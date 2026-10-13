@@ -3,12 +3,26 @@
 
 #define KISSAT_HAS_INCREMENTAL 1
 
+#include <stddef.h>
+
+typedef struct kissat_allocator {
+  void *state;
+  void *(*allocate) (void *state, size_t bytes);
+  void *(*resize) (void *state, void *ptr, size_t bytes);
+  void (*deallocate) (void *state, void *ptr);
+} kissat_allocator;
+
+// Allocation callbacks must return valid storage or exit nonlocally. After
+// a nonlocal exit the owner must reclaim all blocks and discard the solver;
+// its partially modified structures cannot be passed to kissat_release.
+
 typedef struct kissat kissat;
 
 // Default (partial) IPASIR interface.
 
 const char *kissat_signature (void);
 kissat *kissat_init (void);
+kissat *kissat_init_with_allocator (const kissat_allocator *allocator);
 void kissat_add (kissat *solver, int lit);
 void kissat_assume (kissat *solver, int lit);
 int kissat_failed (kissat *solver, int lit);

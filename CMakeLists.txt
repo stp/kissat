@@ -47,6 +47,11 @@ function(kissat_configure_target target)
     target_compile_definitions(${target} PRIVATE STATISTICS
         "$<$<CONFIG:Debug>:LOGGING>" "$<$<CONFIG:Debug>:METRICS>"
         "$<$<CONFIG:Debug>:EMBEDDED>")
+    # Clients may throw from allocator callbacks. Unwind every C frame so
+    # they can discard a partial solver and release its owned allocations.
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${target} PRIVATE -fexceptions)
+    endif()
     if(UNIX)
         target_link_libraries(${target} PRIVATE m)
     endif()
@@ -74,6 +79,7 @@ endif()
 
 if(BUILD_TESTING)
     enable_testing()
+    enable_language(CXX)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     if(BUILD_SHARED_LIBS)
         set(_kissat_test_library kissat)
@@ -91,4 +97,9 @@ if(BUILD_TESTING)
         set_tests_properties(incremental-api-reuse-${_reuse}
             PROPERTIES TIMEOUT 180 LABELS incremental)
     endforeach()
+    add_executable(kissat-allocator-test test/allocator.cpp)
+    target_compile_features(kissat-allocator-test PRIVATE cxx_std_17)
+    target_link_libraries(kissat-allocator-test PRIVATE kissat)
+    add_test(NAME allocator-failure COMMAND kissat-allocator-test)
+    set_tests_properties(allocator-failure PROPERTIES TIMEOUT 30 LABELS incremental)
 endif()

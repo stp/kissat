@@ -48,7 +48,9 @@ void *kissat_malloc (kissat *solver, size_t bytes) {
   void *res;
   if (!bytes)
     return 0;
-  res = malloc (bytes);
+  res = solver && solver->allocator.allocate
+            ? solver->allocator.allocate (solver->allocator.state, bytes)
+            : malloc (bytes);
   LOG4 ("malloc (%zu) = %p", bytes, res);
   if (!res)
     kissat_fatal ("out-of-memory allocating %zu bytes", bytes);
@@ -60,7 +62,10 @@ void kissat_free (kissat *solver, void *ptr, size_t bytes) {
   if (ptr) {
     LOG4 ("free (%p[%zu])", ptr, bytes);
     dec_bytes (solver, bytes);
-    free (ptr);
+    if (solver && solver->allocator.deallocate)
+      solver->allocator.deallocate (solver->allocator.state, ptr);
+    else
+      free (ptr);
   } else
     assert (!bytes);
 }
@@ -82,7 +87,9 @@ void *kissat_nalloc (kissat *solver, size_t n, size_t size) {
   if (MAX_SIZE_T / size < n)
     kissat_fatal ("invalid 'kissat_nalloc (..., %zu, %zu)' call", n, size);
   const size_t bytes = n * size;
-  res = malloc (bytes);
+  res = solver && solver->allocator.allocate
+            ? solver->allocator.allocate (solver->allocator.state, bytes)
+            : malloc (bytes);
   LOG4 ("nalloc (%zu, %zu) = %p", n, size, res);
   if (!res)
     kissat_fatal ("out-of-memory allocating "
@@ -98,9 +105,14 @@ void *kissat_calloc (kissat *solver, size_t n, size_t size) {
     return 0;
   if (MAX_SIZE_T / size < n)
     kissat_fatal ("invalid 'kissat_calloc (..., %zu, %zu)' call", n, size);
-  res = calloc (n, size);
-  LOG4 ("calloc (%zu, %zu) = %p", n, size, res);
   const size_t bytes = n * size;
+  if (solver && solver->allocator.allocate) {
+    res = solver->allocator.allocate (solver->allocator.state, bytes);
+    if (res)
+      memset (res, 0, bytes);
+  } else
+    res = calloc (n, size);
+  LOG4 ("calloc (%zu, %zu) = %p", n, size, res);
   if (!res)
     kissat_fatal ("out-of-memory allocating "
                   "%zu = %zu x %zu bytes",
@@ -126,13 +138,15 @@ void *kissat_realloc (kissat *solver, void *p, size_t old_bytes,
     kissat_free (solver, p, old_bytes);
     return 0;
   }
-  dec_bytes (solver, old_bytes);
 #ifdef LOGGING
   if (GET_OPTION (log) > 3)
     kissat_begin_logging (solver, LOGPREFIX, "realloc (%p[%zu, %zu) = ", p,
                           old_bytes, new_bytes);
 #endif
-  void *res = realloc (p, new_bytes);
+  void *res = solver && solver->allocator.resize
+                  ? solver->allocator.resize (solver->allocator.state, p,
+                                              new_bytes)
+                  : realloc (p, new_bytes);
 #ifdef LOGGING
   if (GET_OPTION (log) > 3) {
     printf ("%p", res);
@@ -142,6 +156,7 @@ void *kissat_realloc (kissat *solver, void *p, size_t old_bytes,
   if (new_bytes && !res)
     kissat_fatal ("out-of-memory reallocating from %zu to %zu bytes",
                   old_bytes, new_bytes);
+  dec_bytes (solver, old_bytes);
   inc_bytes (solver, new_bytes);
   return res;
 }

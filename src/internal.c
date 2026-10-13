@@ -23,8 +23,19 @@ void kissat_reset_last_learned (kissat *solver) {
     *p = INVALID_REF;
 }
 
-kissat *kissat_init (void) {
-  kissat *solver = kissat_calloc (0, 1, sizeof *solver);
+kissat *kissat_init_with_allocator (const kissat_allocator *allocator) {
+  kissat *solver;
+  if (allocator) {
+    kissat_require (allocator->allocate && allocator->resize &&
+                        allocator->deallocate,
+                    "incomplete allocator callbacks");
+    solver = allocator->allocate (allocator->state, sizeof *solver);
+    if (!solver)
+      kissat_fatal ("out-of-memory allocating solver");
+    memset (solver, 0, sizeof *solver);
+    solver->allocator = *allocator;
+  } else
+    solver = kissat_calloc (0, 1, sizeof *solver);
 #ifndef NOPTIONS
   kissat_init_options (&solver->options);
 #else
@@ -49,6 +60,8 @@ kissat *kissat_init (void) {
   solver->prefix = kissat_strdup (solver, "c ");
   return solver;
 }
+
+kissat *kissat_init (void) { return kissat_init_with_allocator (0); }
 
 void kissat_set_prefix (kissat *solver, const char *prefix) {
   kissat_freestr (solver, solver->prefix);
@@ -167,7 +180,10 @@ void kissat_release (kissat *solver) {
       kissat_fatal ("internally leaking %" PRIu64 " bytes", leaked);
 #endif
 
-  kissat_free (0, solver, sizeof *solver);
+  if (solver->allocator.deallocate)
+    solver->allocator.deallocate (solver->allocator.state, solver);
+  else
+    kissat_free (0, solver, sizeof *solver);
 }
 
 void kissat_reserve (kissat *solver, int max_var) {

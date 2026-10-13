@@ -111,6 +111,7 @@ struct kissat {
   bool large_clauses_watched_after_binary_clauses;
 
   termination termination;
+  kissat_allocator allocator;
 
   unsigned vars;
   unsigned size;

@@ -58,6 +58,14 @@ incremental API tests, add `-DBUILD_TESTING=ON`, build, then run
 for these tests. Both the CMake tests and the original `make test` suite run
 in Debug and Release CI jobs.
 
+`kissat_init_with_allocator` accepts per-instance allocation callbacks.
+STP uses these to report allocation failure as RESOURCE and reclaim every
+owned block if an allocation interrupts the C solver. If a callback exits
+nonlocally, discard that solver through the allocation owner; its partially
+modified structures cannot be reused or walked by `kissat_release`.
+The CMake build enables exception unwinding through the C frames. A C++
+client using the configure/make build should add `-fexceptions` as well.
+
 Binaries are provided with each major [release](https://github.com/arminbiere/kissat/releases/).
 
 You can get more information about Kissat in the last solver description for the SAT Competition 2024:
