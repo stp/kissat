@@ -38,6 +38,26 @@ build with `./configure -g -fPIC --shared` and run
 against a separately linked CaDiCaL library, including factoring and aggressive
 inprocessing. Compile it with both libraries and their include directories.
 
+This is [STP's fork](https://github.com/stp/kissat). The `master` and
+`upstream` branches mirror unmodified upstream 4.0.4; `stp` carries the
+incremental extension and a CMake library build. The implementation uses
+[Kissat Extras](https://github.com/aytey/kissat_extras) as a reference.
+
+The CMake build supports the same POSIX toolchains as upstream and installs
+`libkissat.a` and `include/kissat/kissat.h`:
+
+```
+cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build-cmake --parallel
+cmake --install build-cmake --prefix /path/to/install
+```
+
+Use `-DKISSAT_BUILD_CLI=OFF` for a library-only build. To run the exhaustive
+incremental API tests, add `-DBUILD_TESTING=ON`, build, then run
+`ctest --test-dir build-cmake --output-on-failure`. Python 3 is required only
+for these tests. Both the CMake tests and the original `make test` suite run
+in Debug and Release CI jobs.
+
 Binaries are provided with each major [release](https://github.com/arminbiere/kissat/releases/).
 
 You can get more information about Kissat in the last solver description for the SAT Competition 2024:

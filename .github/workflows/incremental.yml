@@ -1,0 +1,36 @@
+name: Incremental Kissat
+
+on:
+  push:
+    branches: [stp]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  incremental:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v7
+      - name: CMake library and API tests
+        run: |
+          cmake -S . -B build-cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DBUILD_TESTING=ON
+          cmake --build build-cmake --parallel 2
+          ctest --test-dir build-cmake --output-on-failure
+          build-cmake/kissat --version
+      - name: Upstream configure and test suite
+        run: |
+          if [ '${{ matrix.build_type }}' = Debug ]; then
+            ./configure -g -fPIC --shared
+          else
+            ./configure -fPIC --shared
+          fi
+          make --jobs=2 test
+          python3 test/incremental.py --cases 500

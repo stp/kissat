@@ -1,0 +1,5 @@
+#define VERSION "@KISSAT_VERSION@"
+#define ID "@_kissat_identifier@"
+#define COMPILER "@KISSAT_COMPILER@"
+#define BUILD "@KISSAT_BUILD@"
+#define DIR "@CMAKE_CURRENT_BINARY_DIR@"
