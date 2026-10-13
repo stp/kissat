@@ -7,6 +7,7 @@ static void adjust_imports_for_external_literal (kissat *solver,
   while (eidx >= SIZE_STACK (solver->import)) {
     struct import import;
     import.lit = 0;
+    import.protected = 0;
     import.extension = false;
     import.imported = false;
     import.eliminated = false;

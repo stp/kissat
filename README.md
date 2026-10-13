@@ -11,6 +11,33 @@ Coincidentally "kissat" also means "cats" in Finnish.
 
 Run `./configure && make test` to configure, build and test in `build`.
 
+This checkout extends 4.0.4 with incremental solving. Set the `incremental`
+option to 1 before the first solve, then use `kissat_assume` for assumptions
+that expire after each solve and `kissat_failed` to query a failed assumption
+core. Clauses may be added between solves, including clauses over previously
+eliminated variables. `kissat_protect` and `kissat_unprotect` keep selected
+variables available across inprocessing. `KISSAT_HAS_INCREMENTAL` identifies
+the extended API. The implementation adapts the restoration and assumption
+approach in Kissat Extras to the current solver.
+
+The `incrementalreuse` option keeps a shared assumption prefix (1) or an
+unchanged solve's full trail (2); its default of 0 starts from the root.
+Local search locks assumptions while walking. Search phases, learned clauses,
+inprocessing limits, and the stable restart schedule survive repeated solves.
+Statistics include `incremental_restorations`, `incremental_restored_literals`,
+`incremental_reused_solves`, and `incremental_reused_levels`.
+
+Factoring introduces external variable IDs. An incremental API client must
+allocate fresh IDs beyond both its already declared IDs and
+`kissat_maximum_variable`, or disable `factor` before the first solve.
+STP's adapter handles this mapping. Build a library
+for STP with `./configure -fPIC && make`. For exhaustive incremental checks,
+build with `./configure -g -fPIC --shared` and run
+`python3 test/incremental.py`. Incremental proof output is not supported.
+`test/incremental-cadical.cpp` optionally checks larger incremental sessions
+against a separately linked CaDiCaL library, including factoring and aggressive
+inprocessing. Compile it with both libraries and their include directories.
+
 Binaries are provided with each major [release](https://github.com/arminbiere/kissat/releases/).
 
 You can get more information about Kissat in the last solver description for the SAT Competition 2024:

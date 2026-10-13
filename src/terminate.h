@@ -13,6 +13,11 @@ static inline bool kissat_terminated (kissat *solver, int bit,
                                       const char *name, const char *file,
                                       long lineno, const char *fun) {
   assert (0 <= bit), assert (bit < 64);
+  // The public callback must participate in the same polling sites as the
+  // asynchronous termination flag, including preprocessing and inprocessing.
+  if (solver->termination.terminate &&
+      solver->termination.terminate ((void *) solver->termination.state))
+    kissat_terminate (solver);
 #ifdef COVERAGE
   const uint64_t mask = (uint64_t) 1 << bit;
   if (!(solver->termination.flagged & mask))

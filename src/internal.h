@@ -44,6 +44,7 @@ typedef struct import import;
 
 struct import {
   unsigned lit;
+  unsigned protected;
   bool extension;
   bool imported;
   bool eliminated;
@@ -89,6 +90,17 @@ struct kissat {
   bool sectioned;
 #endif
   bool stable;
+  bool saved_stable;
+  bool reusable;
+  bool assumptions_complete;
+  uint64_t solve_calls;
+  int result;
+  ints pending;
+  ints assumptions;
+  size_t assumption_next;
+  ints assumption_decisions;
+  ints previous_assumptions;
+  ints failed;
 #if !defined(NDEBUG) || defined(METRICS)
   bool transitive_reducing;
   bool vivifying;

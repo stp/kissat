@@ -1,4 +1,5 @@
 #include "search.h"
+#include "incremental.h"
 #include "analyze.h"
 #include "bump.h"
 #include "classify.h"
@@ -46,7 +47,8 @@ static void start_search (kissat *solver) {
   START (search);
   INC (searches);
 
-  bool stable = (GET_OPTION (stable) == 2);
+  bool stable = GET (searches) == 1 ? (GET_OPTION (stable) == 2)
+                                   : solver->saved_stable;
 
   solver->stable = stable;
   kissat_phase (solver, "search", GET (searches),
@@ -58,16 +60,19 @@ static void start_search (kissat *solver) {
   kissat_classify (solver);
 
   if (solver->stable) {
-    kissat_init_reluctant (solver);
+    if (GET (searches) == 1)
+      kissat_init_reluctant (solver);
     kissat_update_scores (solver);
   }
 
   init_tiers (solver);
 
-  kissat_init_limits (solver);
+  if (GET (searches) == 1)
+    kissat_init_limits (solver);
 
   unsigned seed = GET_OPTION (seed);
-  solver->random = seed;
+  if (GET (searches) == 1)
+    solver->random = seed;
   LOG ("initialized random number generator with seed %u", seed);
 
 #ifndef QUIET
@@ -115,6 +120,7 @@ static void stop_search (kissat *solver) {
     solver->termination.flagged = 0;
   }
 
+  solver->saved_stable = solver->stable;
   if (solver->stable) {
     REPORT (0, ']');
     STOP (stable);
@@ -181,11 +187,13 @@ int kissat_search (kissat *solver) {
   int res = 0;
   if (solver->inconsistent)
     res = 20;
-  if (!res && GET_OPTION (luckyearly))
+  const bool first = !solver->solve_calls;
+  const bool assumptions = !EMPTY_STACK (solver->assumptions);
+  if (!res && first && !assumptions && GET_OPTION (luckyearly))
     res = kissat_lucky (solver);
-  if (!res && kissat_preprocessing (solver))
+  if (!res && first && kissat_preprocessing (solver))
     res = kissat_preprocess (solver);
-  if (!res && GET_OPTION (luckylate))
+  if (!res && first && !assumptions && GET_OPTION (luckylate))
     res = kissat_lucky (solver);
   if (!res)
     kissat_classify (solver);
@@ -197,6 +205,8 @@ int kissat_search (kissat *solver) {
         res = kissat_analyze (solver, conflict);
       else if (solver->iterating)
         iterate (solver);
+      else if (kissat_assuming (solver))
+        res = kissat_assign_assumption (solver);
       else if (!solver->unassigned)
         res = 10;
       else if (TERMINATED (search_terminated_1))

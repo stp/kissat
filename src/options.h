@@ -72,6 +72,7 @@
   OPTION (forwardeffort, 100, 0, 1e6, "effort in per mille") \
   OPTION (ifthenelse, 1, 0, 1, "extract and eliminate if-then-else gates") \
   OPTION (incremental, 0, 0, 1, "enable incremental solving") \
+  OPTION (incrementalreuse, 0, 0, 2, "reuse assumption prefix (1) or entire trail (2)") \
   OPTION (jumpreasons, 1, 0, 1, "jump binary reasons") \
   LOGOPT (log, 0, 0, 5, "logging level (1=on,2=more,3=check,4/5=mem)") \
   OPTION (lucky, 1, 0, 1, "try some lucky assignments") \

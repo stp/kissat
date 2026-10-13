@@ -16,6 +16,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void kissat_reset_last_learned (kissat *solver) {
   for (really_all_last_learned (p))
@@ -83,6 +84,11 @@ void kissat_release (kissat *solver) {
   kissat_release_vectors (solver);
   kissat_release_phases (solver);
 
+  RELEASE_STACK (solver->pending);
+  RELEASE_STACK (solver->assumptions);
+  RELEASE_STACK (solver->assumption_decisions);
+  RELEASE_STACK (solver->previous_assumptions);
+  RELEASE_STACK (solver->failed);
   RELEASE_STACK (solver->export);
   RELEASE_STACK (solver->import);
 
@@ -170,6 +176,13 @@ void kissat_reserve (kissat *solver, int max_var) {
                   max_var);
   kissat_require (max_var <= EXTERNAL_MAX_VAR,
                   "invalid maximum variable argument '%d'", max_var);
+  if (GET_OPTION (incremental)) {
+    // Reserve the external namespace too. Factoring allocates immediately
+    // above the import table, including variables not yet used in clauses.
+    if (max_var)
+      (void) kissat_import_literal (solver, max_var);
+    return;
+  }
   kissat_increase_size (solver, (unsigned) max_var);
   if (!GET_OPTION (tumble)) {
     for (int idx = 1; idx <= max_var; idx++)
@@ -194,6 +207,9 @@ int kissat_set_option (kissat *solver, const char *name, int new_value) {
 #ifndef NOPTIONS
   kissat_require_initialized (solver);
   kissat_require (name, "name zero pointer");
+  if (solver->solve_calls && !strcmp (name, "incremental"))
+    kissat_require (new_value == GET_OPTION (incremental),
+                    "incremental mode must be selected before first solve");
 #ifndef NOPTIONS
   return kissat_options_set (&solver->options, name, new_value);
 #else
@@ -263,9 +279,7 @@ void kissat_print_statistics (kissat *solver) {
   (void) solver;
 }
 
-void kissat_add (kissat *solver, int elit) {
-  kissat_require_initialized (solver);
-  kissat_require (!GET (searches), "incremental solving not supported");
+static void add_original (kissat *solver, int elit) {
 #if !defined(NDEBUG) || !defined(NPROOFS) || defined(LOGGING)
   const int checking = kissat_checking (solver);
   const bool logging = kissat_logging (solver);
@@ -356,6 +370,9 @@ void kissat_add (kissat *solver, int elit) {
         else
           LOGUNARY (unit, "found original");
 
+        // A newly added permanent unit can contradict a retained decision.
+        if (solver->level)
+          kissat_backtrack_in_consistent_state (solver, 0);
         kissat_original_unit (solver, unit);
 
         COVER (solver->level);
@@ -388,20 +405,16 @@ void kissat_add (kissat *solver, int elit) {
           assert (v < 0);
           assert (k > l);
           assert (l > 0);
+          kissat_backtrack_in_consistent_state (solver, l);
           assign = true;
         } else if (u > 0 && v < 0) {
           LOG ("first watch satisfied at level @%u "
                "second falsified at level @%u",
                k, l);
-          assert (k <= l);
-        } else if (!u && v > 0) {
-          LOG ("first watch unassigned "
-               "second falsified at level @%u",
-               l);
-          assign = true;
-        } else {
-          assert (!u);
-          assert (!v);
+          if (k > l) {
+            kissat_backtrack_in_consistent_state (solver, l);
+            assign = true;
+          }
         }
 
         if (assign) {
@@ -472,17 +485,243 @@ void kissat_add (kissat *solver, int elit) {
   }
 }
 
+// Restore the complete extension when a caller revisits an eliminated
+// variable. incremental=1 already makes BVE and substitution record both
+// polarities, so these are clauses of the permanent formula, not a chosen
+// witness. Learned clauses and the remaining CNF survive the restoration.
+static void restore_eliminated (kissat *solver) {
+  if (EMPTY_STACK (solver->eliminated))
+    return;
+  if (solver->level)
+    kissat_backtrack_in_consistent_state (solver, 0);
+  START (restore);
+  INC (incremental_restorations);
+  ADD (incremental_restored_literals, SIZE_STACK (solver->extend));
+  extensions restore = solver->extend;
+  INIT_STACK (solver->extend);
+  CLEAR_STACK (solver->etrail);
+  CLEAR_STACK (solver->eliminated);
+  // The old internal identities remain inactive until collection. Detach
+  // their exports before the same external IDs acquire fresh identities;
+  // otherwise compaction maps an old slot to a newer, larger slot.
+  for (all_variables (idx))
+    if (FLAGS (idx)->eliminated)
+      POKE_STACK (solver->export, idx, 0);
+  const size_t size = SIZE_STACK (solver->import);
+  for (unsigned eidx = 1; eidx < size; eidx++) {
+    import *import = &PEEK_STACK (solver->import, eidx);
+    if (!import->eliminated)
+      continue;
+    const bool extension = import->extension;
+    import->eliminated = false;
+    import->imported = false;
+    (void) kissat_import_literal (solver, (int) eidx);
+    // Importing can enlarge the tables. Reacquire the pointer afterwards.
+    PEEK_STACK (solver->import, eidx).extension = extension;
+  }
+  bool clause = false;
+  for (all_stack (extension, ext, restore)) {
+    if (ext.blocking && clause)
+      add_original (solver, 0);
+    add_original (solver, ext.lit);
+    clause = true;
+  }
+  if (clause)
+    add_original (solver, 0);
+  RELEASE_STACK (restore);
+  STOP (restore);
+}
+
+static void prepare_incremental (kissat *solver) {
+  solver->extended = false;
+  if (solver->level &&
+      (!GET_OPTION (incrementalreuse) || !solver->reusable))
+    kissat_backtrack_in_consistent_state (solver, 0);
+  solver->result = 0;
+}
+
+static bool eliminated_external (kissat *solver, int elit) {
+  const unsigned eidx = ABS (elit);
+  return eidx < SIZE_STACK (solver->import) &&
+         PEEK_STACK (solver->import, eidx).eliminated;
+}
+
+void kissat_add (kissat *solver, int elit) {
+  kissat_require_initialized (solver);
+  if (!GET_OPTION (incremental)) {
+    kissat_require (!solver->solve_calls,
+                    "enable incremental before adding clauses after solve");
+    add_original (solver, elit);
+    return;
+  }
+  // Before the first solve no variable has been eliminated and no trail
+  // needs repair. Stream the initial CNF through the original import path.
+  if (!solver->solve_calls) {
+    add_original (solver, elit);
+    return;
+  }
+  if (elit) {
+    kissat_require_valid_external_internal (elit);
+    PUSH_STACK (solver->pending, elit);
+  } else {
+    prepare_incremental (solver);
+    for (all_stack (int, lit, solver->pending))
+      if (eliminated_external (solver, lit)) {
+        restore_eliminated (solver);
+        break;
+      }
+    for (all_stack (int, lit, solver->pending))
+      add_original (solver, lit);
+    add_original (solver, 0);
+    CLEAR_STACK (solver->pending);
+  }
+}
+
+void kissat_protect (kissat *solver, int elit) {
+  kissat_require_initialized (solver);
+  kissat_require_valid_external_internal (elit);
+  kissat_require (GET_OPTION (incremental), "enable incremental first");
+  kissat_require (EMPTY_STACK (solver->pending) &&
+                  EMPTY_STACK (solver->clause), "incomplete clause");
+  prepare_incremental (solver);
+  if (eliminated_external (solver, elit))
+    restore_eliminated (solver);
+  const unsigned ilit = kissat_import_literal (solver, elit);
+  if (!FLAGS (IDX (ilit))->fixed)
+    kissat_activate_literal (solver, ilit);
+  import *import = &PEEK_STACK (solver->import, ABS (elit));
+  kissat_require (import->protected < UINT_MAX, "protection count overflow");
+  import->protected++;
+}
+
+void kissat_unprotect (kissat *solver, int elit) {
+  kissat_require_initialized (solver);
+  kissat_require_valid_external_internal (elit);
+  const unsigned eidx = ABS (elit);
+  kissat_require (eidx < SIZE_STACK (solver->import) &&
+                  PEEK_STACK (solver->import, eidx).protected,
+                  "variable %u is not protected", eidx);
+  PEEK_STACK (solver->import, eidx).protected--;
+}
+
+void kissat_assume (kissat *solver, int elit) {
+  kissat_protect (solver, elit);
+  PUSH_STACK (solver->assumptions, elit);
+}
+
+int kissat_failed (kissat *solver, int elit) {
+  kissat_require_initialized (solver);
+  kissat_require_valid_external_internal (elit);
+  if (solver->result != 20)
+    return 0;
+  for (all_stack (int, lit, solver->failed))
+    if (lit == elit)
+      return 1;
+  return 0;
+}
+
+int kissat_inconsistent (kissat *solver) {
+  kissat_require_initialized (solver);
+  return solver->inconsistent;
+}
+
+int kissat_maximum_variable (kissat *solver) {
+  kissat_require_initialized (solver);
+  const size_t size = SIZE_STACK (solver->import);
+  return size ? (int) (size - 1) : 0;
+}
+
+void kissat_set_phase (kissat *solver, int elit) {
+  kissat_require_initialized (solver);
+  kissat_require_valid_external_internal (elit);
+  const unsigned eidx = ABS (elit);
+  if (eidx >= SIZE_STACK (solver->import))
+    return;
+  const import *import = &PEEK_STACK (solver->import, eidx);
+  if (!import->imported || import->eliminated)
+    return;
+  unsigned ilit = import->lit;
+  if (elit < 0)
+    ilit = NOT (ilit);
+  SAVED (IDX (ilit)) = NEGATED (ilit) ? -1 : 1;
+}
+
 int kissat_solve (kissat *solver) {
   kissat_require_initialized (solver);
-  kissat_require (EMPTY_STACK (solver->clause),
+  kissat_require (EMPTY_STACK (solver->clause) &&
+                  EMPTY_STACK (solver->pending),
                   "incomplete clause (terminating zero not added)");
-  kissat_require (!GET (searches), "incremental solving not supported");
-  return kissat_search (solver);
+  kissat_require (!solver->solve_calls || GET_OPTION (incremental),
+                  "enable incremental before repeated solving");
+  prepare_incremental (solver);
+  CLEAR_STACK (solver->failed);
+  const size_t previous = SIZE_STACK (solver->previous_assumptions);
+  const size_t current = SIZE_STACK (solver->assumptions);
+  size_t common = 0;
+  while (common < previous && common < current &&
+         PEEK_STACK (solver->previous_assumptions, common) ==
+             PEEK_STACK (solver->assumptions, common))
+    common++;
+  unsigned keep = 0;
+  size_t consumed = 0;
+  const bool all = GET_OPTION (incrementalreuse) == 2 &&
+                   solver->reusable && solver->assumptions_complete &&
+                   common == previous &&
+                   common == current &&
+                   solver->level >= SIZE_STACK (solver->assumption_decisions);
+  if (all) {
+    keep = solver->level;
+    consumed = current;
+  } else if (GET_OPTION (incrementalreuse) && solver->reusable) {
+    const size_t decisions = SIZE_STACK (solver->assumption_decisions);
+    for (; keep < solver->level && keep < decisions; keep++) {
+      const int elit = PEEK_STACK (solver->assumption_decisions, keep);
+      size_t pos = consumed;
+      while (pos < common &&
+             PEEK_STACK (solver->assumptions, pos) != elit)
+        pos++;
+      if (pos == common)
+        break;
+      consumed = pos + 1;
+    }
+  }
+  if (solver->level > keep)
+    kissat_backtrack_in_consistent_state (solver, keep);
+  if (keep) {
+    INC (incremental_reused_solves);
+    ADD (incremental_reused_levels, keep);
+  }
+  if (!all)
+    RESIZE_STACK (solver->assumption_decisions, keep);
+  solver->assumption_next = consumed;
+  const int res = kissat_search (solver);
+  if (res == 20 && !solver->inconsistent && EMPTY_STACK (solver->failed))
+    for (all_stack (int, lit, solver->assumptions))
+      PUSH_STACK (solver->failed, lit);
+  for (all_stack (int, lit, solver->assumptions))
+    kissat_unprotect (solver, lit);
+  CLEAR_STACK (solver->previous_assumptions);
+  for (all_stack (int, lit, solver->assumptions))
+    PUSH_STACK (solver->previous_assumptions, lit);
+  solver->assumptions_complete = solver->assumption_next == current;
+  CLEAR_STACK (solver->assumptions);
+  solver->assumption_next = 0;
+  solver->reusable = res == 10 || res == 0;
+  solver->solve_calls++;
+  solver->result = res;
+  // Early preprocessing/lucky exits do not pass through stop_search.
+  solver->limited.conflicts = solver->limited.decisions = false;
+  solver->termination.flagged = 0;
+  return res;
 }
 
 void kissat_terminate (kissat *solver) {
   kissat_require_initialized (solver);
+#ifdef COVERAGE
+  solver->termination.flagged = ~(uint64_t) 0;
+#else
   solver->termination.flagged = ~(unsigned) 0;
+#endif
   assert (solver->termination.flagged);
 }
 

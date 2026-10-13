@@ -18,6 +18,7 @@
 
 #define kissat_require_valid_external_internal(LIT) \
   do { \
+    kissat_require ((LIT) != 0, "zero is not a literal"); \
     kissat_require ((LIT) != INT_MIN, "invalid literal '%d' (INT_MIN)", \
                     (LIT)); \
     const int TMP_IDX = ABS (LIT); \

@@ -5,6 +5,36 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+// CaDiCaL embeds another Kitten with the same API. Keep these symbols
+// separate when both SAT solvers are linked into one application.
+#ifndef STAND_ALONE_KITTEN
+#define kitten_assume kissat_kitten_assume
+#define kitten_binary kissat_kitten_binary
+#define kitten_clause kissat_kitten_clause
+#define kitten_clause_with_id_and_exception kissat_kitten_clause_with_id_and_exception
+#define kitten_clear kissat_kitten_clear
+#define kitten_compute_clausal_core kissat_kitten_compute_clausal_core
+#define kitten_embedded kissat_kitten_embedded
+#define kitten_failed kissat_kitten_failed
+#define kitten_fixed kissat_kitten_fixed
+#define kitten_flip_literal kissat_kitten_flip_literal
+#define kitten_flip_phases kissat_kitten_flip_phases
+#define kitten_init kissat_kitten_init
+#define kitten_no_ticks_limit kissat_kitten_no_ticks_limit
+#define kitten_randomize_phases kissat_kitten_randomize_phases
+#define kitten_release kissat_kitten_release
+#define kitten_set_ticks_limit kissat_kitten_set_ticks_limit
+#define kitten_shrink_to_clausal_core kissat_kitten_shrink_to_clausal_core
+#define kitten_shuffle_clauses kissat_kitten_shuffle_clauses
+#define kitten_solve kissat_kitten_solve
+#define kitten_status kissat_kitten_status
+#define kitten_track_antecedents kissat_kitten_track_antecedents
+#define kitten_traverse_core_clauses kissat_kitten_traverse_core_clauses
+#define kitten_traverse_core_ids kissat_kitten_traverse_core_ids
+#define kitten_unit kissat_kitten_unit
+#define kitten_value kissat_kitten_value
+#endif
+
 typedef struct kitten kitten;
 
 kitten *kitten_init (void);

@@ -2,6 +2,11 @@
 #include "inlineheap.h"
 #include "inlinequeue.h"
 
+bool kissat_protected_variable (kissat *solver, unsigned idx) {
+  const int elit = PEEK_STACK (solver->export, idx);
+  return elit && PEEK_STACK (solver->import, ABS (elit)).protected;
+}
+
 static inline void activate_literal (kissat *solver, unsigned lit) {
   const unsigned idx = IDX (lit);
   flags *f = FLAGS (idx);
@@ -28,9 +33,11 @@ static inline void activate_literal (kissat *solver, unsigned lit) {
   kissat_mark_added_literal (solver, lit);
   assert (!VALUE (lit));
   assert (!VALUE (NOT (lit)));
-  assert (!SAVED (idx));
-  assert (!TARGET (idx));
-  assert (!BEST (idx));
+  // Incremental namespace reservations can leave a variable inactive
+  // through rephasing, which legitimately initializes its future phases.
+  assert (GET_OPTION (incremental) || !SAVED (idx));
+  assert (GET_OPTION (incremental) || !TARGET (idx));
+  assert (GET_OPTION (incremental) || !BEST (idx));
 }
 
 static inline void deactivate_variable (kissat *solver, flags *f,

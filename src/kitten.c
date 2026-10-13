@@ -957,7 +957,7 @@ static unsigned export_literal (kitten *kitten, unsigned ilit) {
   return elit;
 }
 
-unsigned new_learned_klause (kitten *kitten) {
+static unsigned new_learned_klause (kitten *kitten) {
   unsigned res = new_reference (kitten);
   unsigneds *klauses = &kitten->klauses;
   const size_t size = SIZE_STACK (kitten->klause);
@@ -1255,7 +1255,7 @@ static void backtrack (kitten *kitten, unsigned jump) {
   check_queue (kitten);
 }
 
-void completely_backtrack_to_root_level (kitten *kitten) {
+static void completely_backtrack_to_root_level (kitten *kitten) {
   check_queue (kitten);
   LOG ("completely backtracking to level 0");
   value *values = kitten->values;

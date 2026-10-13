@@ -43,6 +43,7 @@ typedef struct profiles profiles;
   PROF (reorder, 3) \
   PROF (rephase, 3) \
   PROF (restart, 3) \
+  PROF (restore, 2) \
   PROF (search, 1) \
   PROF (shrink, 3) \
   PROF (simplify, 1) \

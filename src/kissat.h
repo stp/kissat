@@ -1,6 +1,8 @@
 #ifndef _kissat_h_INCLUDED
 #define _kissat_h_INCLUDED
 
+#define KISSAT_HAS_INCREMENTAL 1
+
 typedef struct kissat kissat;
 
 // Default (partial) IPASIR interface.
@@ -8,8 +10,15 @@ typedef struct kissat kissat;
 const char *kissat_signature (void);
 kissat *kissat_init (void);
 void kissat_add (kissat *solver, int lit);
+void kissat_assume (kissat *solver, int lit);
+int kissat_failed (kissat *solver, int lit);
+void kissat_protect (kissat *solver, int var);
+void kissat_unprotect (kissat *solver, int var);
 int kissat_solve (kissat *solver);
 int kissat_value (kissat *solver, int lit);
+int kissat_inconsistent (kissat *solver);
+int kissat_maximum_variable (kissat *solver);
+void kissat_set_phase (kissat *solver, int lit);
 void kissat_release (kissat *solver);
 
 void kissat_set_terminate (kissat *solver, void *state,

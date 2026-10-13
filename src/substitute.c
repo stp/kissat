@@ -548,6 +548,13 @@ static bool substitute_round (kissat *solver, unsigned round) {
   unsigned *repr = kissat_malloc (solver, bytes);
   memset (repr, 0xff, bytes);
   determine_representatives (solver, repr);
+  // Keep the external identity of assumptions and frozen variables. Other
+  // members of their equivalence classes may still be substituted.
+  for (all_variables (idx))
+    if (ACTIVE (idx) && kissat_protected_variable (solver, idx)) {
+      repr[LIT (idx)] = LIT (idx);
+      repr[NOT (LIT (idx))] = NOT (LIT (idx));
+    }
   bool *eliminate = add_representative_equivalences (solver, repr);
   substitute_binaries (solver, repr);
   substitute_clauses (solver, repr);

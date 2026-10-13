@@ -25,6 +25,8 @@ struct flags {
 
 struct kissat;
 
+bool kissat_protected_variable (struct kissat *, unsigned);
+
 void kissat_activate_literal (struct kissat *, unsigned);
 void kissat_activate_literals (struct kissat *, unsigned, unsigned *);
 

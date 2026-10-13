@@ -753,6 +753,8 @@ static bool resolvents_limited (kissat *solver, unsigned pivot,
 
 static bool try_to_fast_eliminate (kissat *solver, unsigned pivot) {
   assert (!solver->inconsistent);
+  if (kissat_protected_variable (solver, pivot))
+    return false;
   if (!ACTIVE (pivot))
     return false;
   const unsigned lit = LIT (pivot);

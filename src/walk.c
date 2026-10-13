@@ -3,6 +3,7 @@
 #include "decide.h"
 #include "dense.h"
 #include "inline.h"
+#include "import.h"
 #include "phases.h"
 #include "print.h"
 #include "rephase.h"
@@ -61,6 +62,7 @@ struct walker {
 
   value *original_values;
   value *best_values;
+  value *locked;
 
   doubles scores;
   unsigneds unsat;
@@ -200,6 +202,16 @@ static void import_decision_phases (walker *walker) {
   value *values = solver->values;
   walker->best_values = kissat_calloc (solver, VARS, 1);
   value *best_values = walker->best_values;
+  if (!EMPTY_STACK (solver->assumptions)) {
+    walker->locked = kissat_calloc (solver, VARS, 1);
+    for (all_stack (int, elit, solver->assumptions)) {
+      const unsigned ilit = kissat_import_literal (solver, elit);
+      const unsigned idx = IDX (ilit);
+      const value phase = NEGATED (ilit) ? -1 : 1;
+      assert (!walker->locked[idx] || walker->locked[idx] == phase);
+      walker->locked[idx] = phase;
+    }
+  }
 #ifndef QUIET
   unsigned imported = 0;
 #endif
@@ -207,6 +219,8 @@ static void import_decision_phases (walker *walker) {
     if (!flags[idx].active)
       continue;
     value value = kissat_decide_phase (solver, idx);
+    if (walker->locked && walker->locked[idx])
+      value = walker->locked[idx];
     assert (value);
     best_values[idx] = value;
     const unsigned lit = LIT (idx);
@@ -432,6 +446,8 @@ static void release_walker (walker *walker) {
   RELEASE_STACK (walker->trail);
   kissat_free (solver, solver->values, LITS);
   kissat_free (solver, walker->best_values, VARS);
+  if (walker->locked)
+    kissat_free (solver, walker->locked, VARS);
   RELEASE_STACK (walker->unsat);
   solver->values = walker->original_values;
 }
@@ -484,7 +500,7 @@ static unsigned pick_literal (kissat *solver, walker *walker) {
   const unsigned *const end_of_lits = lits + size;
   for (const unsigned *p = lits; p != end_of_lits; p++) {
     const unsigned lit = *p;
-    if (!values[lit])
+    if (!values[lit] || (walker->locked && walker->locked[IDX (lit)]))
       continue;
     picked_lit = lit;
     const unsigned breaks = break_value (solver, walker, values, lit);
@@ -494,7 +510,10 @@ static unsigned pick_literal (kissat *solver, walker *walker) {
     PUSH_STACK (walker->scores, score);
     sum += score;
   }
-  assert (picked_lit != INVALID_LIT);
+  // A clause falsified entirely by assumptions cannot be repaired by
+  // walking. Leave the refutation to CDCL without changing those phases.
+  if (picked_lit == INVALID_LIT)
+    return INVALID_LIT;
   assert (0 < sum);
 
   const double random = kissat_pick_double (&walker->random);
@@ -514,7 +533,7 @@ static unsigned pick_literal (kissat *solver, walker *walker) {
 
   for (const unsigned *p = lits; p != end_of_lits; p++) {
     const unsigned lit = *p;
-    if (!values[lit])
+    if (!values[lit] || (walker->locked && walker->locked[IDX (lit)]))
       continue;
     const double score = *scores++;
     sum += score;
@@ -736,7 +755,7 @@ static void update_best (kissat *solver, walker *walker) {
   }
 }
 
-static void local_search_step (kissat *solver, walker *walker) {
+static bool local_search_step (kissat *solver, walker *walker) {
   assert (walker->current);
   INC (flipped);
   assert (walker->flipped < UINT64_MAX);
@@ -744,12 +763,15 @@ static void local_search_step (kissat *solver, walker *walker) {
   LOG ("starting local search flip %" PRIu64 " with %u unsatisfied clauses",
        GET (flipped), walker->current);
   unsigned lit = pick_literal (solver, walker);
+  if (lit == INVALID_LIT)
+    return false;
   flip_literal (solver, walker, lit);
   push_flipped (solver, walker, lit);
   if (walker->current < walker->minimum)
     update_best (solver, walker);
   LOG ("ending local search step %" PRIu64 " with %u unsatisfied clauses",
        GET (flipped), walker->current);
+  return true;
 }
 
 static void local_search_round (walker *walker) {
@@ -761,7 +783,8 @@ static void local_search_round (walker *walker) {
   while (walker->minimum && walker->limit > statistics->walk_steps) {
     if (TERMINATED (walk_terminated_1))
       break;
-    local_search_step (solver, walker);
+    if (!local_search_step (solver, walker))
+      break;
   }
 #ifndef QUIET
   report_minimum ("last", solver, walker);

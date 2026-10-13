@@ -372,6 +372,8 @@ static void set_next_elimination_bound (kissat *solver, bool complete) {
 }
 
 static bool can_eliminate_variable (kissat *solver, unsigned idx) {
+  if (kissat_protected_variable (solver, idx))
+    return false;
   flags *flags = FLAGS (idx);
 
   if (!flags->active)

@@ -136,6 +136,10 @@
   STATISTIC (if_then_else_eliminated, 1, PCNT_ELIMINATED, "%", "eliminated") \
   METRIC (if_then_else_extracted, 1, PCNT_EXTRACTED, "%", "extracted") \
   METRIC (initial_decisions, 1, PCNT_DECISIONS, "%", "decisions") \
+  COUNTER (incremental_restorations, 0, NO_SECONDARY, 0, 0) \
+  COUNTER (incremental_restored_literals, 0, NO_SECONDARY, 0, 0) \
+  COUNTER (incremental_reused_levels, 0, NO_SECONDARY, 0, 0) \
+  COUNTER (incremental_reused_solves, 0, NO_SECONDARY, 0, 0) \
   COUNTER (iterations, 1, PCNT_VARIABLES, "%", "variables") \
   STATISTIC (jumped_reasons, 1, PCNT_PROPS, "%", "propagations") \
   STATISTIC (kitten_conflicts, 1, PER_KITTEN_SOLVED, 0, "per solved") \
