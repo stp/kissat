@@ -47,13 +47,15 @@ static int assumption_walk (kissat *solver, unsigned base, bool reverse,
 
 int kissat_assumption_lucky (kissat *solver, unsigned mode) {
   assert (GET_OPTION (incremental));
-  assert (mode >= 1 && mode <= 3);
+  assert (mode >= 1 && mode <= 4);
   assert (!solver->probing);
   assert (kissat_propagated (solver));
   const unsigned base =
-      (unsigned) SIZE_STACK (solver->assumption_decisions);
+      mode == 4 ? solver->level
+                : (unsigned) SIZE_STACK (solver->assumption_decisions);
   assert (base <= solver->level);
-  kissat_backtrack_in_consistent_state (solver, base);
+  if (mode != 4)
+    kissat_backtrack_in_consistent_state (solver, base);
   INC (incremental_lucky_attempts);
   if (mode == 3)
     return 0;
@@ -65,7 +67,7 @@ int kissat_assumption_lucky (kissat *solver, unsigned mode) {
   // can learn, so unsuccessful walks only restore this prefix.
   solver->probing = true;
   int result = 0;
-  const unsigned rounds = mode == 2 ? 4 : 1;
+  const unsigned rounds = mode == 2 || mode == 4 ? 4 : 1;
   for (unsigned round = 0; round < rounds && !result; round++) {
     if (TERMINATED (lucky_terminated_1) ||
         kissat_wall_clock_time () >= deadline)
@@ -81,6 +83,13 @@ int kissat_assumption_lucky (kissat *solver, unsigned mode) {
     assert (kissat_propagated (solver));
     assert (!solver->unassigned);
     INC (incremental_lucky_successes);
+    if (GET_OPTION (incrementalluckyphasecache))
+      for (all_variables (idx)) {
+        if (!(idx & 1023) && TERMINATED (lucky_terminated_1))
+          break;
+        if (ACTIVE (idx))
+          SAVED (idx) = VALUE (LIT (idx));
+      }
   } else if (kissat_wall_clock_time () >= deadline)
     INC (incremental_lucky_timeouts);
   return result;
