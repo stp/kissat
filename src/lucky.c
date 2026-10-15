@@ -7,7 +7,84 @@
 #include "print.h"
 #include "proprobe.h"
 #include "report.h"
+#include "resources.h"
 #include "terminate.h"
+
+static int assumption_walk (kissat *solver, unsigned base, bool reverse,
+                            bool positive, double deadline) {
+  const size_t size = SIZE_STACK (solver->import);
+  for (size_t offset = 1; offset < size; offset++) {
+    if (!(offset & 1023) && (TERMINATED (lucky_terminated_1) ||
+                             kissat_wall_clock_time () >= deadline))
+      return 0;
+    const size_t position = reverse ? size - offset : offset;
+    const import *import = &PEEK_STACK (solver->import, position);
+    if (!import->imported || import->eliminated)
+      continue;
+    unsigned lit = import->lit;
+    if (!ACTIVE (IDX (lit)) || VALUE (lit))
+      continue;
+    if (!positive)
+      lit = NOT (lit);
+    kissat_internal_assume (solver, lit);
+    clause *conflict = kissat_probing_propagate (solver, 0, true);
+    if (!conflict)
+      continue;
+    INC (incremental_lucky_conflicts);
+    assert (solver->level > base);
+    if (solver->level <= base)
+      return 0;
+    kissat_backtrack_without_updating_phases (solver, solver->level - 1);
+    kissat_internal_assume (solver, NOT (lit));
+    conflict = kissat_probing_propagate (solver, 0, true);
+    if (conflict) {
+      INC (incremental_lucky_conflicts);
+      return 0;
+    }
+  }
+  return solver->unassigned ? 0 : 10;
+}
+
+int kissat_assumption_lucky (kissat *solver, unsigned mode) {
+  assert (GET_OPTION (incremental));
+  assert (mode >= 1 && mode <= 3);
+  assert (!solver->probing);
+  assert (kissat_propagated (solver));
+  const unsigned base =
+      (unsigned) SIZE_STACK (solver->assumption_decisions);
+  assert (base <= solver->level);
+  kissat_backtrack_in_consistent_state (solver, base);
+  INC (incremental_lucky_attempts);
+  if (mode == 3)
+    return 0;
+  const double deadline = kissat_wall_clock_time () +
+                          0.001 * GET_OPTION (incrementalluckymilliseconds);
+  START (lucky);
+  // Assumptions stay on their decision levels. A failed greedy branch must
+  // not learn the root units that the ordinary assumption-free lucky walk
+  // can learn, so unsuccessful walks only restore this prefix.
+  solver->probing = true;
+  int result = 0;
+  const unsigned rounds = mode == 2 ? 4 : 1;
+  for (unsigned round = 0; round < rounds && !result; round++) {
+    if (TERMINATED (lucky_terminated_1) ||
+        kissat_wall_clock_time () >= deadline)
+      break;
+    result = assumption_walk (solver, base, round >= 2, (round & 1) != 0,
+                              deadline);
+    if (!result)
+      kissat_backtrack_without_updating_phases (solver, base);
+  }
+  solver->probing = false;
+  STOP (lucky);
+  if (result) {
+    assert (kissat_propagated (solver));
+    assert (!solver->unassigned);
+    INC (incremental_lucky_successes);
+  } else if (kissat_wall_clock_time () >= deadline)
+    INC (incremental_lucky_timeouts);
+  return result;
+}
 
 static bool no_all_negative_clauses (struct kissat *solver) {
   clause *last_irredundant = kissat_last_irredundant_clause (solver);

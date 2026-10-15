@@ -94,6 +94,8 @@ struct kissat {
   bool reusable;
   bool assumptions_complete;
   uint64_t solve_calls;
+  uint64_t incremental_lucky_last_clauses;
+  bool incremental_lucky_failed;
   int result;
   ints pending;
   ints assumptions;

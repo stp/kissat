@@ -72,6 +72,11 @@
   OPTION (forwardeffort, 100, 0, 1e6, "effort in per mille") \
   OPTION (ifthenelse, 1, 0, 1, "extract and eliminate if-then-else gates") \
   OPTION (incremental, 0, 0, 1, "enable incremental solving") \
+  OPTION (incrementallucky, 0, 0, 3, "bounded assumption greedy walk (3=restart)") \
+  OPTION (incrementalluckydecisions, 10000, 0, INT_MAX, "greedy decision trigger") \
+  OPTION (incrementalluckyinit, 100, 0, INT_MAX, "greedy conflict trigger") \
+  OPTION (incrementalluckymilliseconds, 250, 1, 10000, "greedy wall time budget") \
+  OPTION (incrementalluckyminclauses, 100000, 0, INT_MAX, "greedy formula threshold") \
   OPTION (incrementalreuse, 0, 0, 2, "reuse assumption prefix (1) or entire trail (2)") \
   OPTION (jumpreasons, 1, 0, 1, "jump binary reasons") \
   LOGOPT (log, 0, 0, 5, "logging level (1=on,2=more,3=check,4/5=mem)") \

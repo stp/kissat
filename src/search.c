@@ -199,6 +199,21 @@ int kissat_search (kissat *solver) {
     kissat_classify (solver);
   if (!res && searching (solver)) {
     start_search (solver);
+    const unsigned greedy_mode = GET_OPTION (incrementallucky);
+    const uint64_t original_clauses = GET (clauses_original);
+    const uint64_t last_greedy = solver->incremental_lucky_last_clauses;
+    bool greedy_pending =
+        greedy_mode && GET_OPTION (incremental) &&
+        !solver->limited.conflicts && !solver->limited.decisions &&
+        original_clauses >=
+            (unsigned) GET_OPTION (incrementalluckyminclauses) &&
+        (!solver->incremental_lucky_failed ||
+         (original_clauses >= last_greedy + 100000 &&
+          original_clauses / 4 >= last_greedy));
+    const uint64_t greedy_conflicts =
+        CONFLICTS + GET_OPTION (incrementalluckyinit);
+    const uint64_t greedy_decisions =
+        DECISIONS + GET_OPTION (incrementalluckydecisions);
     while (!res) {
       clause *conflict = kissat_search_propagate (solver);
       if (conflict)
@@ -211,7 +226,13 @@ int kissat_search (kissat *solver) {
         res = 10;
       else if (TERMINATED (search_terminated_1))
         break;
-      else if (kissat_reducing (solver))
+      else if (greedy_pending && (CONFLICTS >= greedy_conflicts ||
+                                  DECISIONS >= greedy_decisions)) {
+        greedy_pending = false;
+        solver->incremental_lucky_last_clauses = original_clauses;
+        res = kissat_assumption_lucky (solver, greedy_mode);
+        solver->incremental_lucky_failed = !res;
+      } else if (kissat_reducing (solver))
         res = kissat_reduce (solver);
       else if (kissat_switching_search_mode (solver))
         kissat_switch_search_mode (solver);

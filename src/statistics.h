@@ -138,6 +138,10 @@
   METRIC (initial_decisions, 1, PCNT_DECISIONS, "%", "decisions") \
   COUNTER (incremental_restorations, 0, NO_SECONDARY, 0, 0) \
   COUNTER (incremental_restored_literals, 0, NO_SECONDARY, 0, 0) \
+  COUNTER (incremental_lucky_attempts, 0, NO_SECONDARY, 0, 0) \
+  COUNTER (incremental_lucky_conflicts, 0, NO_SECONDARY, 0, 0) \
+  COUNTER (incremental_lucky_successes, 0, NO_SECONDARY, 0, 0) \
+  COUNTER (incremental_lucky_timeouts, 0, NO_SECONDARY, 0, 0) \
   COUNTER (incremental_reused_levels, 0, NO_SECONDARY, 0, 0) \
   COUNTER (incremental_reused_solves, 0, NO_SECONDARY, 0, 0) \
   COUNTER (iterations, 1, PCNT_VARIABLES, "%", "variables") \
