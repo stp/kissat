@@ -226,8 +226,11 @@ int kissat_search (kissat *solver) {
         res = 10;
       else if (TERMINATED (search_terminated_1))
         break;
-      else if (greedy_pending && (CONFLICTS >= greedy_conflicts ||
-                                  DECISIONS >= greedy_decisions)) {
+      else if (greedy_pending &&
+               solver->unassigned >=
+                   (unsigned) GET_OPTION (incrementalluckyminunassigned) &&
+               (CONFLICTS >= greedy_conflicts ||
+                DECISIONS >= greedy_decisions)) {
         greedy_pending = false;
         solver->incremental_lucky_last_clauses = original_clauses;
         res = kissat_assumption_lucky (solver, greedy_mode);
