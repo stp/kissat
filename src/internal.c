@@ -678,6 +678,9 @@ int kissat_solve (kissat *solver) {
          PEEK_STACK (solver->previous_assumptions, common) ==
              PEEK_STACK (solver->assumptions, common))
     common++;
+  if (GET_OPTION (incrementalluckynewcontext) &&
+      (common != previous || common != current))
+    solver->incremental_lucky_failed = false;
   unsigned keep = 0;
   size_t consumed = 0;
   const bool all = GET_OPTION (incrementalreuse) == 2 &&

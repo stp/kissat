@@ -74,10 +74,12 @@
   OPTION (incremental, 0, 0, 1, "enable incremental solving") \
   OPTION (incrementallucky, 0, 0, 4, "bounded greedy walk (3=restart,4=current)") \
   OPTION (incrementalluckydecisions, 10000, 0, INT_MAX, "greedy decision trigger") \
+  OPTION (incrementalluckygrowth, 4, 1, 16, "greedy retry clause growth factor") \
   OPTION (incrementalluckyinit, 100, 0, INT_MAX, "greedy conflict trigger") \
   OPTION (incrementalluckymilliseconds, 250, 1, 10000, "greedy wall time budget") \
   OPTION (incrementalluckyminclauses, 100000, 0, INT_MAX, "greedy formula threshold") \
   OPTION (incrementalluckyminunassigned, 0, 0, INT_MAX, "greedy unassigned threshold") \
+  OPTION (incrementalluckynewcontext, 0, 0, 1, "retry greedy after changed assumptions") \
   OPTION (incrementalluckyphasecache, 0, 0, 1, "save phases after greedy SAT") \
   OPTION (incrementalreuse, 0, 0, 2, "reuse assumption prefix (1) or entire trail (2)") \
   OPTION (jumpreasons, 1, 0, 1, "jump binary reasons") \

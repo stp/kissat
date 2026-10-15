@@ -209,7 +209,8 @@ int kissat_search (kissat *solver) {
             (unsigned) GET_OPTION (incrementalluckyminclauses) &&
         (!solver->incremental_lucky_failed ||
          (original_clauses >= last_greedy + 100000 &&
-          original_clauses / 4 >= last_greedy));
+          original_clauses / GET_OPTION (incrementalluckygrowth) >=
+              last_greedy));
     const uint64_t greedy_conflicts =
         CONFLICTS + GET_OPTION (incrementalluckyinit);
     const uint64_t greedy_decisions =
