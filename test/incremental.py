@@ -39,6 +39,22 @@ def main():
     def models(n, clauses):
         return [m for m in range(1 << n) if all(any(truth(l, m) for l in c) for c in clauses)]
 
+    # Preprocessing an empty base must not pass null zero-sized arrays to
+    # memset. Then grow that same solver and check retractable assumptions.
+    for reuse in range(3):
+        s = lib.kissat_init()
+        for name, value in [('incremental', 1), ('incrementalreuse', reuse),
+                            ('quiet', 1), ('luckyearly', 0), ('luckylate', 0)]:
+            set_option(s, name, value)
+        assert lib.kissat_solve(s) == 10
+        add(s, [1])
+        lib.kissat_assume(s, -1)
+        assert lib.kissat_solve(s) == 20
+        assert not lib.kissat_inconsistent(s)
+        assert lib.kissat_solve(s) == 10
+        assert lib.kissat_value(s, 1) > 0
+        lib.kissat_release(s)
+
     for case in range(args.cases):
         s = lib.kissat_init()
         set_option(s, 'incremental', 1)
@@ -141,7 +157,7 @@ def main():
     assert not lib.kissat_inconsistent(s)
     assert lib.kissat_solve(s) == 10
     lib.kissat_release(s)
-    print(f'PASS: {args.cases} sessions, {calls} exhaustive differential solves; models, cores, limits, and repeated UNSAT')
+    print(f'PASS: {args.cases} sessions, {calls} exhaustive differential solves; models, cores, limits, repeated UNSAT, and 3 empty-sweep sessions')
 
 
 if __name__ == '__main__':

@@ -546,7 +546,8 @@ static bool substitute_round (kissat *solver, unsigned round) {
   const unsigned active = solver->active;
   size_t bytes = LITS * sizeof (unsigned);
   unsigned *repr = kissat_malloc (solver, bytes);
-  memset (repr, 0xff, bytes);
+  if (bytes)
+    memset (repr, 0xff, bytes);
   determine_representatives (solver, repr);
   // Keep the external identity of assumptions and frozen variables. Other
   // members of their equivalence classes may still be substituted.
