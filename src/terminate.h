@@ -87,5 +87,6 @@ static inline bool kissat_terminated (kissat *solver, int bit,
 #define vivify_terminated_5 41
 #define walk_terminated_1 42
 #define warmup_terminated_1 43
+#define lucky_terminated_1 44
 
 #endif

@@ -102,4 +102,9 @@ if(BUILD_TESTING)
     target_link_libraries(kissat-allocator-test PRIVATE kissat)
     add_test(NAME allocator-failure COMMAND kissat-allocator-test)
     set_tests_properties(allocator-failure PROPERTIES TIMEOUT 30 LABELS incremental)
+    add_test(NAME lucky-interruption
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/lucky-interruption.py"
+            --library "$<TARGET_FILE:${_kissat_test_library}>")
+    set_tests_properties(lucky-interruption PROPERTIES TIMEOUT 30 LABELS incremental)
 endif()
