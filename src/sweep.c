@@ -81,9 +81,11 @@ static void init_sweeper (kissat *solver, sweeper *sweeper) {
   for (all_literals (lit))
     sweeper->reprs[lit] = lit;
   NALLOC (sweeper->prev, VARS);
-  memset (sweeper->prev, 0xff, VARS * sizeof *sweeper->prev);
+  if (VARS)
+    memset (sweeper->prev, 0xff, VARS * sizeof *sweeper->prev);
   NALLOC (sweeper->next, VARS);
-  memset (sweeper->next, 0xff, VARS * sizeof *sweeper->next);
+  if (VARS)
+    memset (sweeper->next, 0xff, VARS * sizeof *sweeper->next);
 #ifndef NDEBUG
   for (all_variables (idx))
     assert (sweeper->prev[idx] == INVALID_IDX);
