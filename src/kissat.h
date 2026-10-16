@@ -2,6 +2,8 @@
 #define _kissat_h_INCLUDED
 
 #define KISSAT_HAS_INCREMENTAL 1
+#define KISSAT_HAS_INTERRUPTIBLE_LUCKY 1
+#define KISSAT_HAS_INCREMENTAL_GREEDY 1
 
 #include <stddef.h>
 
