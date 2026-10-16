@@ -27,6 +27,31 @@ inprocessing limits, and the stable restart schedule survive repeated solves.
 Statistics include `incremental_restorations`, `incremental_restored_literals`,
 `incremental_reused_solves`, and `incremental_reused_levels`.
 
+The optional `incrementallucky` search tries greedy SAT completions without
+copying the formula. It is disabled by default (0). Mode 1 tries a forward
+false-first walk, mode 2 tries four combinations of forward/reverse order and
+false/true polarity, mode 3 only backtracks to the assumption prefix as a
+diagnostic control, and mode 4 tries the four walks above the current search
+trail. Every mode preserves the assumption prefix. A conflicting choice is
+flipped once; an unsuccessful walk backtracks without learning conditional
+root units, and ordinary CDCL search resumes. Only a complete propagated
+assignment can supply a SAT answer. The header capability macro
+`KISSAT_HAS_INCREMENTAL_GREEDY` identifies these options.
+
+By default an attempt requires 100,000 original clauses and either 100 new
+conflicts or 10,000 new decisions in that solve. The corresponding options
+are `incrementalluckyminclauses`, `incrementalluckyinit` and
+`incrementalluckydecisions`. Each solve makes at most one attempt, with a
+250 ms soft allowance (`incrementalluckymilliseconds`) and termination
+polling between propagation calls. Explicit conflict or decision limits
+bypass the optional walk. After failure, another attempt requires at least
+100,000 new original clauses and four times the previous attempt's clause
+count; `incrementalluckygrowth=1` keeps only the absolute growth requirement.
+`incrementalluckynewcontext=1` also permits retries after assumptions change.
+`incrementalluckyminunassigned` can gate attempts on the remaining variables,
+and `incrementalluckyphasecache=1` saves phases after a successful completion.
+Statistics report attempts, conflicts, successful completions and timeouts.
+
 Factoring introduces external variable IDs. An incremental API client must
 allocate fresh IDs beyond both its already declared IDs and
 `kissat_maximum_variable`, or disable `factor` before the first solve.
