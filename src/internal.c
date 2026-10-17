@@ -102,6 +102,7 @@ void kissat_release (kissat *solver) {
   RELEASE_STACK (solver->assumption_decisions);
   RELEASE_STACK (solver->previous_assumptions);
   RELEASE_STACK (solver->failed);
+  kissat_release_exchange (solver);
   RELEASE_STACK (solver->export);
   RELEASE_STACK (solver->import);
 

@@ -182,6 +182,10 @@ static bool searching (kissat *solver) {
   return true;
 }
 
+static inline bool importing (kissat *solver) {
+  return solver->exchange.next && CONFLICTS >= solver->exchange.limit;
+}
+
 int kissat_search (kissat *solver) {
   REPORT (0, '*');
   int res = 0;
@@ -227,6 +231,8 @@ int kissat_search (kissat *solver) {
         res = 10;
       else if (TERMINATED (search_terminated_1))
         break;
+      else if (importing (solver))
+        res = kissat_import_clauses (solver); // shared clauses (STP)
       else if (greedy_pending &&
                solver->unassigned >=
                    (unsigned) GET_OPTION (incrementalluckyminunassigned) &&

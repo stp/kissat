@@ -195,6 +195,8 @@ void kissat_learn_clause (kissat *solver) {
   if (!solver->probing)
     kissat_update_learned (solver, glue, size);
   assert (size > 0);
+  if (size > 1 && size <= solver->exchange.max_size)
+    kissat_export_clause (solver, size, BEGIN_STACK (solver->clause));
   reference ref = INVALID_REF;
   if (size == 1)
     learn_unit (solver, not_uip);

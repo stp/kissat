@@ -9,6 +9,7 @@
 #include "classify.h"
 #include "clause.h"
 #include "cover.h"
+#include "exchange.h"
 #include "extend.h"
 #include "flags.h"
 #include "format.h"
@@ -114,6 +115,7 @@ struct kissat {
 
   termination termination;
   kissat_allocator allocator;
+  exchange exchange;
 
   unsigned vars;
   unsigned size;

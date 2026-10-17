@@ -52,6 +52,25 @@ count; `incrementalluckygrowth=1` keeps only the absolute growth requirement.
 and `incrementalluckyphasecache=1` saves phases after a successful completion.
 Statistics report attempts, conflicts, successful completions and timeouts.
 
+Copies of one loaded solver, such as processes forked after the clauses were
+added, can exchange learned clauses. `kissat_set_learn` passes every learned
+clause up to a size limit, and every unit derived at the root, to a callback
+in external literals; clauses over variables that factoring introduced stay
+private. `kissat_set_import` polls a callback between propagation and the
+next decision every given number of conflicts, with a per-poll budget for
+clauses of two or more literals. An imported clause must be implied by the
+added clauses. It becomes a redundant clause, after backtracking as far as
+watching it requires; a clause over an eliminated, substituted, unused or
+factoring variable is dropped rather than restored, and nothing is imported
+while a proof is written. `kissat_get_import_statistics` counts polls,
+imported clauses and units, drops, satisfied clauses and backtracks.
+`kissat_diversify` changes only search state between solves: the seed, the
+saved phases (all true, all false or pseudo-random) and, optionally, the
+decision queue and score order. Search mode remains the `stable` option,
+which the first search reads. `KISSAT_HAS_CLAUSE_EXCHANGE` identifies the
+extension, and `test/exchange.cpp` checks answers and models while copies
+exchange clauses under inprocessing, factoring and both incremental modes.
+
 Factoring introduces external variable IDs. An incremental API client must
 allocate fresh IDs beyond both its already declared IDs and
 `kissat_maximum_variable`, or disable `factor` before the first solve.
