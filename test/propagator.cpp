@@ -4,247 +4,109 @@
 // rejects models that violate them. It keeps the assignment only from the
 // notifications, and every model check compares that with the model. Every
 // answer is compared with a solver given all clauses directly.
-extern "C" {
-#include "kissat.h"
-}
-#include <algorithm>
-#include <cstdio>
-#include <cstdlib>
-#include <random>
-#include <vector>
+//
+// Rounds also vary what the CryptoMiniSat fuzzer of the same interface
+// varies: lazy propagators, reasons shuffled, weakened by false literals,
+// with duplicates or not implying their literal at all, models rejected
+// without a clause, searches stopped from a callback or the terminator and
+// resumed, and variables observed (fixed ones and after the formula became
+// inconsistent included), unobserved and observed again on a reconnected
+// propagator between solves. Separate processes check that a callback
+// calling into the solver is refused.
+#include "theory.h"
+
+#include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace {
 
-void fail(unsigned round, const char *what) {
-  std::fprintf(stderr, "round %u: %s\n", round, what);
-  std::exit(1);
-}
-
-struct Theory {
-  unsigned round = 0;
-  std::mt19937 *random = nullptr;
-  std::vector<std::vector<int>> clauses; // hidden
-  std::vector<bool> handed;              // given as a permanent clause
-  std::vector<bool> observed;            // by variable
-  std::vector<signed char> value;        // by variable, from notifications
-  std::vector<int> trail;                // variables, in notification order
-  std::vector<size_t> levels;            // trail size at each new level
-  std::vector<int> reason, pending;
-  size_t reason_at = 0, pending_at = 0;
-  bool propagating = true, deciding = false, advising = false;
-  bool checking_only = false; // silent until a model is checked
-  unsigned long notified = 0, repeated = 0, propagations = 0, conflicts = 0,
-                eager = 0, checks = 0, rejected = 0, decisions = 0,
-                backtracks = 0;
-
-  signed char val(int lit) const {
-    const signed char v = value[std::abs(lit)];
-    return lit < 0 ? -v : v;
-  }
-
-  // A hidden clause falsified, or unit, under the notified assignment.
-  int find(bool want_unit, int &unit) const {
-    for (size_t i = 0; i < clauses.size(); i++) {
-      int open = 0, last = 0;
-      bool sat = false;
-      for (int lit : clauses[i]) {
-        const signed char v = val(lit);
-        if (v > 0) {
-          sat = true;
-          break;
-        }
-        if (!v)
-          open++, last = lit;
-      }
-      if (sat)
-        continue;
-      if (!open && !want_unit)
-        return int(i);
-      if (open == 1 && want_unit) {
-        unit = last;
-        return int(i);
-      }
-    }
-    return -1;
-  }
-
-  void stage(const std::vector<int> &clause) {
-    pending = clause;
-    pending_at = 0;
-  }
-
-  static void notify_assignment(void *state, const int *lits, size_t size) {
-    auto &t = *static_cast<Theory *>(state);
-    for (size_t i = 0; i < size; i++) {
-      const int lit = lits[i], var = std::abs(lit);
-      if (!lit || size_t(var) >= t.observed.size() || !t.observed[var])
-        fail(t.round, "notified an unobserved variable");
-      t.notified++;
-      const signed char v = lit < 0 ? -1 : 1;
-      if (t.value[var]) {
-        if (t.value[var] != v)
-          fail(t.round, "notified twice with different values");
-        t.repeated++;
-        continue;
-      }
-      t.value[var] = v;
-      t.trail.push_back(var);
-    }
-  }
-  static void notify_new_decision_level(void *state) {
-    auto &t = *static_cast<Theory *>(state);
-    t.levels.push_back(t.trail.size());
-  }
-  static void notify_backtrack(void *state, size_t new_level) {
-    auto &t = *static_cast<Theory *>(state);
-    t.backtracks++;
-    if (new_level >= t.levels.size())
-      fail(t.round, "backtrack to a level never announced");
-    const size_t keep = t.levels[new_level];
-    t.levels.resize(new_level);
-    while (t.trail.size() > keep) {
-      t.value[t.trail.back()] = 0;
-      t.trail.pop_back();
-    }
-    t.pending.clear(); // about the trail just left
-  }
-  static int check_found_model(void *state, const int *model, size_t size) {
-    auto &t = *static_cast<Theory *>(state);
-    t.checks++;
-    size_t observed = 0;
-    for (size_t i = 0; i < size; i++) {
-      const int lit = model[i];
-      if (t.val(lit) <= 0)
-        fail(t.round, "model differs from the notified assignment");
-    }
-    for (size_t v = 1; v < t.observed.size(); v++)
-      observed += t.observed[v];
-    if (observed != size)
-      fail(t.round, "model does not cover the observed variables");
-    int unit = 0;
-    const int i = t.find(false, unit);
-    if (i < 0)
-      return 1;
-    t.rejected++;
-    t.stage(t.clauses[i]);
-    return 0;
-  }
-  static int has_external_clause(void *state, int *forgettable) {
-    auto &t = *static_cast<Theory *>(state);
-    *forgettable = (*t.random)() % 2;
-    if (!t.pending.empty())
-      return 1;
-    if (t.checking_only)
+struct Terminator {
+  unsigned polls = 0;
+  bool fired = false;
+  static int terminate(void *state) {
+    auto &t = *static_cast<Terminator *>(state);
+    if (!t.polls)
       return 0;
-    int unit = 0;
-    int i = t.find(false, unit);
-    if (i >= 0) {
-      t.conflicts++;
-      t.stage(t.clauses[i]);
-      return 1;
-    }
-    if (!t.propagating && (i = t.find(true, unit)) >= 0) {
-      t.stage(t.clauses[i]); // a lazy propagator's unit, as a clause
-      return 1;
-    }
-    if ((*t.random)() % 64)
-      return 0;
-    // Now and then a hidden clause early, whatever the trail makes it.
-    i = int((*t.random)() % t.clauses.size());
-    if (t.handed[i])
-      return 0;
-    t.eager++;
-    if (!*forgettable)
-      t.handed[i] = true;
-    t.stage(t.clauses[i]);
-    return 1;
-  }
-  static int add_external_clause_lit(void *state) {
-    auto &t = *static_cast<Theory *>(state);
-    if (t.pending_at == t.pending.size()) {
-      t.pending.clear();
-      t.pending_at = 0;
-      return 0;
-    }
-    return t.pending[t.pending_at++];
-  }
-  static int propagate(void *state) {
-    auto &t = *static_cast<Theory *>(state);
-    int unit = 0;
-    const int i = t.find(true, unit);
-    if (i < 0)
-      return 0;
-    t.propagations++;
-    // The reason: the propagated literal first, then the others.
-    t.reason.clear();
-    t.reason.push_back(unit);
-    for (int lit : t.clauses[i])
-      if (lit != unit)
-        t.reason.push_back(lit);
-    t.reason_at = 0;
-    return unit;
-  }
-  static int add_reason_clause_lit(void *state, int lit) {
-    auto &t = *static_cast<Theory *>(state);
-    if (t.reason.empty() || t.reason[0] != lit)
-      fail(t.round, "asked for the reason of another literal");
-    if (t.reason_at == t.reason.size())
-      return 0;
-    return t.reason[t.reason_at++];
-  }
-  static int decide(void *state) {
-    auto &t = *static_cast<Theory *>(state);
-    if ((*t.random)() % 4)
-      return 0;
-    std::vector<int> open;
-    for (size_t v = 1; v < t.observed.size(); v++)
-      if (t.observed[v] && !t.value[v])
-        open.push_back(int(v));
-    if (open.empty())
-      return 0;
-    t.decisions++;
-    const int var = open[(*t.random)() % open.size()];
-    return (*t.random)() % 2 ? var : -var;
-  }
-  static int advise(void *state, int lit) {
-    auto &t = *static_cast<Theory *>(state);
-    if (t.val(lit))
-      fail(t.round, "advice offered for an assigned literal");
-    switch ((*t.random)() % 3) {
-    case 0:
-      return lit;
-    case 1:
-      return -lit;
-    default:
-      return 0;
-    }
+    if (!--t.polls)
+      t.fired = true;
+    return t.fired;
   }
 };
 
-void add(kissat *solver, const std::vector<int> &clause) {
-  for (int lit : clause)
-    kissat_add(solver, lit);
-  kissat_add(solver, 0);
+// Whether a callback calling 'call' on the solver is refused (aborts).
+
+struct Intruder {
+  kissat *solver;
+  void (*call)(kissat *);
+  static void notify(void *state, const int *, size_t) {
+    auto &i = *static_cast<Intruder *>(state);
+    i.call(i.solver);
+  }
+  static void level(void *) {}
+  static void backtrack(void *, size_t) {}
+  static int check(void *, const int *, size_t) { return 1; }
+  static int clause(void *, int *) { return 0; }
+  static int lit(void *) { return 0; }
+};
+
+bool refused(void (*call)(kissat *)) {
+  std::fflush(stdout);
+  std::fflush(stderr);
+  const pid_t pid = fork();
+  if (pid < 0)
+    return false;
+  if (!pid) {
+    if (!std::freopen("/dev/null", "w", stderr))
+      _exit(2);
+    kissat *solver = kissat_init();
+    kissat_set_option(solver, "quiet", 1);
+    kissat_set_option(solver, "incremental", 1);
+    add(solver, {1, 2});
+    add(solver, {-1, 2});
+    Intruder intruder = {solver, call};
+    kissat_external_propagator c = {};
+    c.state = &intruder;
+    c.notify_assignment = Intruder::notify;
+    c.notify_new_decision_level = Intruder::level;
+    c.notify_backtrack = Intruder::backtrack;
+    c.check_found_model = Intruder::check;
+    c.has_external_clause = Intruder::clause;
+    c.add_external_clause_lit = Intruder::lit;
+    kissat_connect_external_propagator(solver, &c);
+    kissat_add_observed_var(solver, 1);
+    kissat_add_observed_var(solver, 2);
+    (void)kissat_solve(solver);
+    _exit(0);
+  }
+  int status = 0;
+  if (waitpid(pid, &status, 0) != pid)
+    return false;
+  return WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT;
 }
 
-bool satisfies(kissat *solver, const std::vector<std::vector<int>> &cnf) {
-  for (const auto &clause : cnf) {
-    bool sat = false;
-    for (int lit : clause)
-      sat = sat || kissat_value(solver, lit) == lit;
-    if (!sat)
-      return false;
-  }
-  return true;
+void check_refusals() {
+  if (refused([](kissat *) {}))
+    fail(0, "a callback that does not call the solver aborted");
+  if (!refused([](kissat *s) { kissat_add(s, 1); }) ||
+      !refused([](kissat *s) { (void)kissat_value(s, 1); }) ||
+      !refused([](kissat *s) { (void)kissat_solve(s); }) ||
+      !refused([](kissat *s) { kissat_add_observed_var(s, 2); }) ||
+      !refused([](kissat *s) { kissat_remove_observed_var(s, 1); }) ||
+      !refused([](kissat *s) { kissat_disconnect_external_propagator(s); }))
+    fail(0, "a callback calling into the solver was not refused");
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
   const unsigned rounds = argc > 1 ? std::atoi(argv[1]) : 300;
+  check_refusals();
   std::mt19937 random(20261018);
-  unsigned long answers[3] = {0, 0, 0}, solves = 0;
-  Theory total;
+  unsigned long answers[3] = {0, 0, 0}, solves = 0, lazy_solves = 0;
+  unsigned long late = 0, late_fixed = 0, after_unsat = 0, unobserved = 0,
+                reconnected = 0;
+  Counts total;
   for (unsigned round = 0; round != rounds; ++round) {
     const int vars = 30 + random() % 60;
     std::vector<std::vector<int>> base, hidden;
@@ -260,30 +122,43 @@ int main(int argc, char **argv) {
          i++)
       base.push_back({literal(1 + random() % vars), literal(1 + random() % vars),
                       literal(1 + random() % vars)});
+    auto hidden_clause = [&](int must) {
+      std::vector<int> clause;
+      if (must)
+        clause.push_back(literal(must));
+      for (unsigned j = clause.size(), k = 2 + random() % 3; j < k; j++)
+        clause.push_back(literal(watched[random() % watched.size()]));
+      return clause;
+    };
     if (watched.size() > 2)
       for (int i = 0, n = int(vars * (0.4 + (random() % 40) / 100.0)); i != n;
-           i++) {
-        std::vector<int> clause;
-        for (unsigned j = 0, k = 2 + random() % 3; j != k; j++)
-          clause.push_back(literal(watched[random() % watched.size()]));
-        hidden.push_back(clause);
-      }
+           i++)
+        hidden.push_back(hidden_clause(0));
+    if (watched.empty()) {
+      observed[1] = true;
+      watched.push_back(1);
+    }
     if (hidden.empty())
-      hidden.push_back({literal(watched.empty() ? 1 : watched[0])});
+      hidden.push_back({literal(watched[0])});
 
+    kissat *solver = kissat_init();
     Theory theory;
     theory.round = round;
     theory.random = &random;
+    theory.solver = solver;
     theory.clauses = hidden;
     theory.handed.assign(hidden.size(), false);
     theory.observed = observed;
     theory.value.assign(vars + 1, 0);
-    theory.propagating = round % 4 != 3;
-    theory.checking_only = round % 8 == 7;
-    theory.deciding = round % 5 == 1;
-    theory.advising = round % 3 == 2;
+    theory.lazy = round % 9 == 4;
+    theory.propagating = !theory.lazy && round % 4 != 3;
+    theory.checking_only = theory.lazy || round % 8 == 7;
+    theory.deciding = !theory.lazy && round % 5 == 1;
+    theory.advising = !theory.lazy && round % 3 == 2;
+    theory.mangling = round % 3 == 0;
+    theory.giving_up = round % 10 == 3;
+    const bool changing = round % 2; // observations change between solves
 
-    kissat *solver = kissat_init();
     kissat_set_option(solver, "quiet", 1);
     kissat_set_option(solver, "incremental", 1);
     kissat_set_option(solver, "chrono", round % 2);
@@ -296,87 +171,168 @@ int main(int argc, char **argv) {
       kissat_set_option(solver, name, 10 + random() % 40);
     for (const auto &clause : base)
       add(solver, clause);
-    kissat_external_propagator callbacks = {};
-    callbacks.state = &theory;
-    callbacks.notify_assignment = Theory::notify_assignment;
-    callbacks.notify_new_decision_level = Theory::notify_new_decision_level;
-    callbacks.notify_backtrack = Theory::notify_backtrack;
-    callbacks.check_found_model = Theory::check_found_model;
-    callbacks.has_external_clause = Theory::has_external_clause;
-    callbacks.add_external_clause_lit = Theory::add_external_clause_lit;
-    if (theory.propagating) {
-      callbacks.propagate = Theory::propagate;
-      callbacks.add_reason_clause_lit = Theory::add_reason_clause_lit;
-    }
-    if (theory.deciding)
-      callbacks.decide = Theory::decide;
-    if (theory.advising)
-      callbacks.advise_decision_polarity = Theory::advise;
+    Terminator terminator;
+    kissat_set_terminate(solver, &terminator, Terminator::terminate);
+    kissat_external_propagator callbacks = theory.callbacks();
     kissat_connect_external_propagator(solver, &callbacks);
     for (int v : watched)
       kissat_add_observed_var(solver, v);
 
-    for (unsigned step = 0, steps = 1 + random() % 4; step != steps; step++) {
+    for (unsigned step = 0, steps = 1 + random() % 6; step != steps; step++) {
+      if (step && changing) {
+        if (random() % 6 == 0) {
+          // Reconnected: told everything again from the root.
+          kissat_disconnect_external_propagator(solver);
+          theory.reset_assignment();
+          kissat_connect_external_propagator(solver, &callbacks);
+          for (int v : watched)
+            kissat_add_observed_var(solver, v);
+          reconnected++;
+        }
+        if (watched.size() > 2 && random() % 4 == 0) {
+          // Unobserved: its hidden clauses become ordinary ones.
+          const size_t at = random() % watched.size();
+          const int var = watched[at];
+          for (size_t i = 0; i < theory.clauses.size();) {
+            const auto &clause = theory.clauses[i];
+            if (std::find_if(clause.begin(), clause.end(), [&](int lit) {
+                  return std::abs(lit) == var;
+                }) == clause.end()) {
+              i++;
+              continue;
+            }
+            base.push_back(clause);
+            add(solver, clause);
+            theory.clauses.erase(theory.clauses.begin() + i);
+            theory.handed.erase(theory.handed.begin() + i);
+          }
+          kissat_remove_observed_var(solver, var);
+          theory.observed[var] = false;
+          watched.erase(watched.begin() + at);
+          unobserved++;
+          if (theory.clauses.empty()) {
+            theory.clauses.push_back({literal(watched[0])});
+            theory.handed.push_back(false);
+          }
+        }
+        if (random() % 3 == 0) {
+          // Observed late, perhaps fixed already or after the formula
+          // became inconsistent, with hidden clauses of its own.
+          std::vector<int> open;
+          for (int v = 1; v <= vars; v++)
+            if (!theory.observed[v])
+              open.push_back(v);
+          if (!open.empty()) {
+            const int var = open[random() % open.size()];
+            if (random() % 2) {
+              // Fixed first, told as a root assignment of its own.
+              const int unit = literal(var);
+              base.push_back({unit});
+              add(solver, {unit});
+              late_fixed++;
+            }
+            if (kissat_inconsistent(solver))
+              after_unsat++;
+            kissat_add_observed_var(solver, var);
+            theory.observed[var] = true;
+            watched.push_back(var);
+            late++;
+            for (unsigned i = 0, n = 1 + random() % 2; i != n; i++) {
+              theory.clauses.push_back(hidden_clause(var));
+              theory.handed.push_back(false);
+            }
+          }
+        }
+        if (random() % 2) {
+          // A permanent clause between solves.
+          std::vector<int> clause = {literal(1 + random() % vars),
+                                     literal(1 + random() % vars),
+                                     literal(1 + random() % vars)};
+          base.push_back(clause);
+          add(solver, clause);
+        }
+      }
       std::vector<int> assumptions;
       for (unsigned i = 0, n = random() % 4; i != n; i++)
         assumptions.push_back(literal(1 + random() % vars));
-      if (step && random() % 2) {
-        // A permanent clause between solves.
-        std::vector<int> clause = {literal(1 + random() % vars),
-                                   literal(1 + random() % vars),
-                                   literal(1 + random() % vars)};
-        base.push_back(clause);
-        add(solver, clause);
-      }
       kissat *oracle = kissat_init();
       kissat_set_option(oracle, "quiet", 1);
       for (const auto &clause : base)
         add(oracle, clause);
-      for (const auto &clause : hidden)
+      for (const auto &clause : theory.clauses)
         add(oracle, clause);
       for (int lit : assumptions)
         add(oracle, {lit});
       const int expected = kissat_solve(oracle);
       kissat_release(oracle);
 
+      theory.gave_up = theory.stopped = theory.refusing = false;
+      terminator.fired = false;
+      terminator.polls = 0;
+      theory.stop_after = 0;
+      switch (round % 11) {
+      case 5:
+        terminator.polls = 1 + random() % 50;
+        break;
+      case 6:
+        if (!theory.lazy)
+          theory.stop_after = 1 + random() % 20;
+        break;
+      default:
+        break;
+      }
       for (int lit : assumptions)
         kissat_assume(solver, lit);
       const int result = kissat_solve(solver);
+      theory.stop_after = 0; // not between solves
       solves++;
-      if (result != expected)
+      lazy_solves += theory.lazy;
+      const bool stopped = terminator.fired || theory.stopped;
+      theory.counts.terminated += stopped;
+      if (!result) {
+        if (!stopped && !theory.gave_up)
+          fail(round, "unknown without a reason");
+      } else if (result != expected)
         fail(round, "answer differs from the oracle");
       if (result == 10) {
-        if (!satisfies(solver, base) || !satisfies(solver, hidden))
+        if (!satisfies(solver, base) || !satisfies(solver, theory.clauses))
           fail(round, "model violates the formula");
         for (int lit : assumptions)
           if (kissat_value(solver, lit) != lit)
             fail(round, "model violates an assumption");
-        for (int v : watched)
-          if (theory.value[v] != (kissat_value(solver, v) > 0 ? 1 : -1))
-            fail(round, "notified assignment differs from the model");
+        if (!theory.lazy)
+          for (int v : watched)
+            if (theory.value[v] != (kissat_value(solver, v) > 0 ? 1 : -1))
+              fail(round, "notified assignment differs from the model");
       }
       answers[result == 10 ? 0 : result == 20 ? 1 : 2]++;
     }
     kissat_disconnect_external_propagator(solver);
     kissat_release(solver);
-    total.notified += theory.notified, total.repeated += theory.repeated;
-    total.propagations += theory.propagations;
-    total.conflicts += theory.conflicts, total.eager += theory.eager;
-    total.checks += theory.checks, total.rejected += theory.rejected;
-    total.decisions += theory.decisions;
-    total.backtracks += theory.backtracks;
+    total.add(theory.counts);
   }
-  std::printf("rounds %u, solves %lu: sat %lu unsat %lu unknown %lu\n",
-              rounds, solves, answers[0], answers[1], answers[2]);
-  std::printf("notified %lu (repeated %lu), backtracks %lu, propagations "
-              "%lu, conflicts %lu, eager %lu, checks %lu (rejected %lu), "
-              "decisions %lu\n",
-              total.notified, total.repeated, total.backtracks,
-              total.propagations, total.conflicts, total.eager, total.checks,
-              total.rejected, total.decisions);
-  return answers[0] && answers[1] && !answers[2] && total.propagations &&
-                 total.conflicts && total.rejected && total.decisions &&
-                 total.eager
-             ? 0
-             : 1;
+  std::printf("rounds %u, solves %lu (lazy %lu): sat %lu unsat %lu unknown "
+              "%lu\n",
+              rounds, solves, lazy_solves, answers[0], answers[1],
+              answers[2]);
+  std::printf("notified %lu (repeated %lu, decisions %lu), backtracks %lu, "
+              "propagations %lu, conflicts %lu, eager %lu, checks %lu "
+              "(rejected %lu, without a clause %lu), decisions %lu\n",
+              total.notified, total.repeated, total.is_decision,
+              total.backtracks, total.propagations, total.conflicts,
+              total.eager, total.checks, total.rejected, total.gave_up,
+              total.decisions);
+  std::printf("reasons shuffled %lu, weakened %lu, duplicated %lu, broken "
+              "%lu; stopped %lu; observed late %lu (fixed %lu, after unsat "
+              "%lu), unobserved %lu, reconnected %lu\n",
+              total.shuffled, total.weakened, total.duplicated, total.broken,
+              total.terminated, late, late_fixed, after_unsat, unobserved,
+              reconnected);
+  const bool covered =
+      answers[0] && answers[1] && lazy_solves && total.propagations &&
+      total.conflicts && total.rejected && total.decisions && total.eager &&
+      total.shuffled && total.weakened && total.duplicated && total.broken &&
+      total.gave_up && total.terminated && total.is_decision && late &&
+      late_fixed && after_unsat && unobserved && reconnected;
+  return covered ? 0 : 1;
 }

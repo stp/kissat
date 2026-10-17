@@ -184,6 +184,7 @@ static bool searching (kissat *solver) {
 
 static inline bool external_propagating (kissat *solver) {
   return solver->propagator.connected &&
+         !solver->propagator.callbacks.is_lazy &&
          SIZE_ARRAY (solver->trail) != solver->propagator.propagated;
 }
 

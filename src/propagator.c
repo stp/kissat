@@ -37,16 +37,56 @@
 // variables are protected from elimination and substitution, so it always
 // may name those.
 //
+// A literal it proposes that does not end up assigned (its reason does not
+// imply it, or names a variable that is not active) ends the round of
+// propagation, so a propagator that keeps proposing it cannot hold up the
+// search; it is asked again once the trail has changed. So does a run of
+// proposals that change nothing longer than the observed variables.
+//
 // A complete assignment is a model only when the propagator accepts it;
 // otherwise the clause it then supplies is added and the search goes on.
 // The lucky and greedy shortcuts, which can declare a model without the
 // propagator, are skipped while it is connected, and proofs are not traced.
+// A lazy propagator only takes part in that check.
+//
+// Every callback runs with 'calling' set, and the API refuses the calls
+// that would change the solver (see 'kissat_require_outside_callbacks').
 
 #define PROPAGATOR (&solver->propagator)
+
+// Callbacks run with 'calling' set; 'p' is the propagator.
+
+#define CALL_VOID(NAME, ...) \
+  do { \
+    assert (!p->calling); \
+    p->calling = true; \
+    p->callbacks.NAME (__VA_ARGS__); \
+    p->calling = false; \
+  } while (0)
+
+#define CALL_INT(NAME, ...) \
+  (assert (!p->calling), p->calling = true, \
+   returned (p, p->callbacks.NAME (__VA_ARGS__)))
+
+static inline int returned (propagator *p, int res) {
+  p->calling = false;
+  return res;
+}
+
+// Between solves, back to the root, dropping the extension of the last
+// model first, as every call that changes the formula does.
+
+static void backtrack_to_root (kissat *solver) {
+  solver->extended = false;
+  solver->result = 0;
+  if (solver->level)
+    kissat_backtrack_in_consistent_state (solver, 0);
+}
 
 void kissat_connect_external_propagator (
     kissat *solver, const kissat_external_propagator *callbacks) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require (callbacks, "zero propagator");
   propagator *p = PROPAGATOR;
   kissat_require (!p->connected, "a propagator is already connected");
@@ -64,9 +104,15 @@ void kissat_connect_external_propagator (
   kissat_require (!solver->proof,
                   "can not trace a proof with an external propagator");
 #endif
-  if (solver->level)
-    kissat_backtrack_in_consistent_state (solver, 0);
+  backtrack_to_root (solver);
   p->callbacks = *callbacks;
+  if (callbacks->is_lazy) {
+    // Only the model check and the clauses that follow a rejection.
+    p->callbacks.propagate = 0;
+    p->callbacks.add_reason_clause_lit = 0;
+    p->callbacks.decide = 0;
+    p->callbacks.advise_decision_polarity = 0;
+  }
   p->connected = true;
   p->notified = 0;
   p->notified_level = 0;
@@ -75,6 +121,7 @@ void kissat_connect_external_propagator (
 
 void kissat_disconnect_external_propagator (kissat *solver) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   propagator *p = PROPAGATOR;
   kissat_require (p->connected, "no propagator connected");
   kissat_reset_observed_vars (solver);
@@ -89,6 +136,7 @@ static bool observing (propagator *p, unsigned eidx) {
 
 void kissat_add_observed_var (kissat *solver, int evar) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require_valid_external_internal (evar);
   propagator *p = PROPAGATOR;
   kissat_require (p->connected, "connect a propagator first");
@@ -96,14 +144,14 @@ void kissat_add_observed_var (kissat *solver, int evar) {
   if (observing (p, eidx))
     return;
   // At the root, so that a fixed variable can be told as a root assignment.
-  if (solver->level)
-    kissat_backtrack_in_consistent_state (solver, 0);
+  backtrack_to_root (solver);
   kissat_protect (solver, (int) eidx);
   while (SIZE_STACK (p->observing) <= eidx)
     PUSH_STACK (p->observing, 0);
   POKE_STACK (p->observing, eidx, 1);
   PUSH_STACK (p->observed, (int) eidx);
-  const import *const import = &PEEK_STACK (solver->import, eidx);
+  const import *const import =
+      &PEEK_STACK (solver->import, (unsigned) eidx);
   assert (import->imported);
   assert (!import->eliminated);
   const unsigned ilit = import->lit;
@@ -117,7 +165,8 @@ void kissat_add_observed_var (kissat *solver, int evar) {
 static void unobserve (kissat *solver, unsigned eidx) {
   propagator *p = PROPAGATOR;
   POKE_STACK (p->observing, eidx, 0);
-  const import *const import = &PEEK_STACK (solver->import, eidx);
+  const import *const import =
+      &PEEK_STACK (solver->import, (unsigned) eidx);
   if (import->imported && !import->eliminated)
     FLAGS (IDX (import->lit))->observed = false;
   kissat_unprotect (solver, (int) eidx);
@@ -125,6 +174,7 @@ static void unobserve (kissat *solver, unsigned eidx) {
 
 void kissat_remove_observed_var (kissat *solver, int evar) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require_valid_external_internal (evar);
   propagator *p = PROPAGATOR;
   const unsigned eidx = ABS (evar);
@@ -145,6 +195,7 @@ void kissat_remove_observed_var (kissat *solver, int evar) {
 
 void kissat_reset_observed_vars (kissat *solver) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   propagator *p = PROPAGATOR;
   for (all_stack (int, eidx, p->observed))
     unobserve (solver, (unsigned) eidx);
@@ -163,13 +214,46 @@ void kissat_release_propagator (kissat *solver) {
 
 /*------------------------------------------------------------------------*/
 
+#ifndef NDEBUG
+
+// What the propagator was told and what it observes, checked after every
+// notification in debug builds with 'check' above one (as by default).
+
+static void check_propagator (kissat *solver) {
+  if (GET_OPTION (check) < 2)
+    return;
+  const propagator *const p = PROPAGATOR;
+  assert (p->connected);
+  assert (!p->calling);
+  assert (EMPTY_STACK (p->notifications));
+  assert (p->notified == SIZE_ARRAY (solver->trail));
+  assert (p->notified_level == solver->level);
+  assert (EMPTY_STACK (p->fixed));
+  for (all_stack (int, eidx, p->observed)) {
+    assert (observing ((propagator *) p, (unsigned) eidx));
+    const import *const import =
+        &PEEK_STACK (solver->import, (unsigned) eidx);
+    assert (import->imported);
+    assert (!import->eliminated);
+    assert (!import->extension);
+    assert (import->protected);
+    const unsigned idx = IDX (import->lit);
+    assert (FLAGS (idx)->observed || FLAGS (idx)->fixed);
+  }
+}
+
+#else
+#define check_propagator(...) \
+  do { \
+  } while (0)
+#endif
+
 static void notify_batch (kissat *solver) {
   propagator *p = PROPAGATOR;
   if (EMPTY_STACK (p->notifications))
     return;
-  p->callbacks.notify_assignment (p->callbacks.state,
-                                  BEGIN_STACK (p->notifications),
-                                  SIZE_STACK (p->notifications));
+  CALL_VOID (notify_assignment, p->callbacks.state,
+             BEGIN_STACK (p->notifications), SIZE_STACK (p->notifications));
   p->statistics.notified += SIZE_STACK (p->notifications);
   CLEAR_STACK (p->notifications);
 }
@@ -178,6 +262,8 @@ static void notify_trail (kissat *solver) {
   propagator *p = PROPAGATOR;
   assert (p->connected);
   assert (EMPTY_STACK (p->notifications));
+  if (p->callbacks.is_lazy)
+    return;
   if (!EMPTY_STACK (p->fixed)) {
     // Observed after being fixed: told at the root (the propagator is at
     // the root whenever such a variable is observed).
@@ -193,7 +279,7 @@ static void notify_trail (kissat *solver) {
     while (p->notified_level < solver->level &&
            FRAME (p->notified_level + 1).trail <= pos) {
       notify_batch (solver);
-      p->callbacks.notify_new_decision_level (p->callbacks.state);
+      CALL_VOID (notify_new_decision_level, p->callbacks.state);
       p->notified_level++;
     }
     const unsigned lit = trail[pos];
@@ -205,15 +291,11 @@ static void notify_trail (kissat *solver) {
   }
   notify_batch (solver);
   while (p->notified_level < solver->level) {
-    p->callbacks.notify_new_decision_level (p->callbacks.state);
+    CALL_VOID (notify_new_decision_level, p->callbacks.state);
     p->notified_level++;
   }
   p->notified = size;
-}
-
-void kissat_propagator_notify (kissat *solver) {
-  if (PROPAGATOR->connected && !solver->probing && !solver->warming)
-    notify_trail (solver);
+  check_propagator (solver);
 }
 
 void kissat_propagator_flush (kissat *solver) {
@@ -233,7 +315,7 @@ void kissat_propagator_backtrack (kissat *solver, unsigned new_level,
   if (!p->connected)
     return;
   if (new_level < p->notified_level) {
-    p->callbacks.notify_backtrack (p->callbacks.state, new_level);
+    CALL_VOID (notify_backtrack, p->callbacks.state, new_level);
     p->notified_level = new_level;
     // What stays assigned above 'new_end' is told again.
     if (p->notified > new_end)
@@ -254,7 +336,8 @@ static unsigned import_active (kissat *solver, int elit) {
   const unsigned eidx = ABS (elit);
   if (eidx >= SIZE_STACK (solver->import))
     return INVALID_LIT;
-  const import *const import = &PEEK_STACK (solver->import, eidx);
+  const import *const import =
+      &PEEK_STACK (solver->import, (unsigned) eidx);
   if (!import->imported || import->eliminated || import->extension)
     return INVALID_LIT;
   unsigned ilit = import->lit;
@@ -455,26 +538,34 @@ static void read_external_clause (kissat *solver) {
   propagator *p = PROPAGATOR;
   CLEAR_STACK (p->literals);
   for (int elit;
-       (elit = p->callbacks.add_external_clause_lit (p->callbacks.state));)
+       (elit = CALL_INT (add_external_clause_lit, p->callbacks.state));)
     PUSH_STACK (p->literals, elit);
 }
+
+// Returns -1 when the trail changed, 20 when the formula became
+// inconsistent, 0 for a literal that was already true, and 1 for one that
+// is not assigned after all (unusable, or its reason does not imply it).
 
 static int propagate_literal (kissat *solver, int elit) {
   propagator *p = PROPAGATOR;
   const unsigned ilit = import_active (solver, elit);
-  if (ilit == INVALID_LIT || VALUE (ilit) > 0)
+  if (ilit == INVALID_LIT)
+    return 1;
+  if (VALUE (ilit) > 0)
     return 0;
   CLEAR_STACK (p->literals);
   bool contained = false;
-  for (int other; (other = p->callbacks.add_reason_clause_lit (
-                       p->callbacks.state, elit));) {
+  for (int other; (other = CALL_INT (add_reason_clause_lit,
+                                     p->callbacks.state, elit));) {
     contained = contained || other == elit;
     PUSH_STACK (p->literals, other);
   }
   if (!contained)
-    return 0;
+    return 1;
   const int res = add_external_clause (solver, true);
-  return res == -2 ? 0 : res;
+  if (res == 20 || res == -1)
+    return res;
+  return 1;
 }
 
 int kissat_propagator_propagate (kissat *solver) {
@@ -483,20 +574,26 @@ int kissat_propagator_propagate (kissat *solver) {
   assert (!solver->inconsistent);
   assert (!solver->probing);
   void *const state = p->callbacks.state;
-  if (p->callbacks.propagate)
-    for (;;) {
+  if (p->callbacks.propagate) {
+    const size_t limit = SIZE_STACK (p->observed);
+    for (size_t idle = 0;;) {
       notify_trail (solver);
-      const int elit = p->callbacks.propagate (state);
+      const int elit = CALL_INT (propagate, state);
       if (!elit)
         break;
       const int res = propagate_literal (solver, elit);
-      if (res)
+      if (res == 20 || res == -1)
         return res;
+      if (res || idle++ == limit) {
+        p->statistics.ignored++;
+        break;
+      }
     }
+  }
   for (;;) {
     notify_trail (solver);
     int forgettable = 0;
-    if (!p->callbacks.has_external_clause (state, &forgettable))
+    if (!CALL_INT (has_external_clause, state, &forgettable))
       break;
     read_external_clause (solver);
     const int res = add_external_clause (solver, forgettable);
@@ -514,7 +611,8 @@ int kissat_propagator_check_model (kissat *solver) {
   notify_trail (solver);
   CLEAR_STACK (p->literals);
   for (all_stack (int, eidx, p->observed)) {
-    const import *const import = &PEEK_STACK (solver->import, eidx);
+    const import *const import =
+        &PEEK_STACK (solver->import, (unsigned) eidx);
     assert (import->imported);
     assert (!import->eliminated);
     const value value = VALUE (import->lit);
@@ -523,12 +621,12 @@ int kissat_propagator_check_model (kissat *solver) {
   }
   p->statistics.checks++;
   void *const state = p->callbacks.state;
-  if (p->callbacks.check_found_model (state, BEGIN_STACK (p->literals),
-                                      SIZE_STACK (p->literals)))
+  if (CALL_INT (check_found_model, state, BEGIN_STACK (p->literals),
+                SIZE_STACK (p->literals)))
     return 10;
   p->statistics.rejected++;
   int forgettable = 0;
-  while (p->callbacks.has_external_clause (state, &forgettable)) {
+  while (CALL_INT (has_external_clause, state, &forgettable)) {
     read_external_clause (solver);
     const int res = add_external_clause (solver, forgettable);
     if (res == 20)
@@ -545,7 +643,7 @@ bool kissat_propagator_decide (kissat *solver) {
   if (!p->connected || !p->callbacks.decide)
     return false;
   notify_trail (solver);
-  const int elit = p->callbacks.decide (p->callbacks.state);
+  const int elit = CALL_INT (decide, p->callbacks.state);
   if (!elit)
     return false;
   const unsigned ilit = import_active (solver, elit);
@@ -567,7 +665,7 @@ int kissat_propagator_advise (kissat *solver, unsigned idx, int value) {
   notify_trail (solver);
   const int offered = value > 0 ? elit : -elit;
   const int advised =
-      p->callbacks.advise_decision_polarity (p->callbacks.state, offered);
+      CALL_INT (advise_decision_polarity, p->callbacks.state, offered);
   if (advised != -offered)
     return value;
   p->statistics.advised++;

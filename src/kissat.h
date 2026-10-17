@@ -116,8 +116,9 @@ void kissat_diversify (kissat *solver, int seed, int phase, int shuffle);
 // External propagation, the IPASIR-UP interface (an STP extension), with
 // CaDiCaL's callbacks as C function pointers and the decision polarity
 // advice of STP's CaDiCaL fork. Requires the 'incremental' option and no
-// proof. The callbacks run inside 'kissat_solve' and must not call back
-// into the solver, except 'kissat_is_decision'.
+// proof. The callbacks run inside 'kissat_solve' and may not call back
+// into the solver, except 'kissat_is_decision' and 'kissat_terminate';
+// every other call from a callback is refused.
 //
 // The propagator is told, in trail order, every assignment of an observed
 // variable ('notify_assignment'), every new decision level and every
@@ -138,8 +139,13 @@ void kissat_diversify (kissat *solver, int seed, int phase, int shuffle);
 // about to decide, for observed variables only, and returns it, its
 // negation or zero (keep it).
 //
+// A propagator that sets 'is_lazy' only checks complete assignments, as
+// CaDiCaL's lazy propagators do: it is told nothing during the search, and
+// neither propagates, decides nor advises.
+//
 // Observing a variable protects it from elimination and substitution
-// (restoring it first if necessary). Disconnecting unobserves everything.
+// (restoring it first if necessary), between solves only. Disconnecting
+// unobserves everything.
 
 typedef struct kissat_external_propagator {
   void *state;
@@ -153,6 +159,7 @@ typedef struct kissat_external_propagator {
   int (*add_reason_clause_lit) (void *state, int propagated_lit);
   int (*decide) (void *state);
   int (*advise_decision_polarity) (void *state, int default_literal);
+  int is_lazy;
 } kissat_external_propagator;
 
 void kissat_connect_external_propagator (
