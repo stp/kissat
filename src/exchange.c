@@ -43,6 +43,7 @@ void kissat_set_learn (kissat *solver, void *state, unsigned max_size,
                        void (*learn) (void *state, unsigned size,
                                       const int *clause)) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   exchange *exchange = &solver->exchange;
   exchange->learn_state = state;
   exchange->learn = learn;
@@ -53,6 +54,7 @@ void kissat_set_import (kissat *solver, void *state, unsigned interval,
                         unsigned (*budget) (void *state),
                         const int *(*next) (void *state, unsigned *size)) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   exchange *exchange = &solver->exchange;
   exchange->import_state = state;
   exchange->budget = budget;
@@ -334,6 +336,7 @@ int kissat_import_clauses (kissat *solver) {
 
 void kissat_diversify (kissat *solver, int seed, int phase, int shuffle) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require (seed >= 0, "negative seed");
   if (solver->level)
     kissat_backtrack_in_consistent_state (solver, 0);

@@ -5,6 +5,7 @@
 #define KISSAT_HAS_INTERRUPTIBLE_LUCKY 1
 #define KISSAT_HAS_INCREMENTAL_GREEDY 1
 #define KISSAT_HAS_CLAUSE_EXCHANGE 1
+#define KISSAT_HAS_EXTERNAL_PROPAGATOR 1
 
 #include <stddef.h>
 #include <stdint.h>
@@ -111,5 +112,62 @@ void kissat_get_import_statistics (kissat *solver,
 // changes, so copies of one solver search differently on the same clauses.
 
 void kissat_diversify (kissat *solver, int seed, int phase, int shuffle);
+
+// External propagation, the IPASIR-UP interface (an STP extension), with
+// CaDiCaL's callbacks as C function pointers and the decision polarity
+// advice of STP's CaDiCaL fork. Requires the 'incremental' option and no
+// proof. The callbacks run inside 'kissat_solve' and may not call back
+// into the solver, except 'kissat_is_decision' and 'kissat_terminate';
+// every other call from a callback is refused.
+//
+// The propagator is told, in trail order, every assignment of an observed
+// variable ('notify_assignment'), every new decision level and every
+// backtrack below a level it heard about. Root assignments are told at the
+// root, a variable fixed before it was observed included, and an assignment
+// that chronological backtracking keeps is told again. 'check_found_model'
+// accepts (nonzero) or rejects a complete assignment, given as the values
+// of the observed variables; after a rejection 'has_external_clause' must
+// offer a clause that the assignment falsifies. 'has_external_clause' is
+// asked after every propagation fixpoint; its clauses, read literal by
+// literal with 'add_external_clause_lit' up to a zero, may only name active
+// (or fixed) variables, and are redundant when it sets 'is_forgettable'.
+// The optional 'propagate' returns an implied literal of an observed
+// variable, or zero, and 'add_reason_clause_lit' then reads its reason
+// clause, which contains it. The optional 'decide' returns an unassigned
+// literal of an observed variable to decide, or zero. The optional
+// 'advise_decision_polarity' sees the literal the ordinary heuristic is
+// about to decide, for observed variables only, and returns it, its
+// negation or zero (keep it).
+//
+// A propagator that sets 'is_lazy' only checks complete assignments, as
+// CaDiCaL's lazy propagators do: it is told nothing during the search, and
+// neither propagates, decides nor advises.
+//
+// Observing a variable protects it from elimination and substitution
+// (restoring it first if necessary), between solves only. Disconnecting
+// unobserves everything.
+
+typedef struct kissat_external_propagator {
+  void *state;
+  void (*notify_assignment) (void *state, const int *lits, size_t size);
+  void (*notify_new_decision_level) (void *state);
+  void (*notify_backtrack) (void *state, size_t new_level);
+  int (*check_found_model) (void *state, const int *model, size_t size);
+  int (*has_external_clause) (void *state, int *is_forgettable);
+  int (*add_external_clause_lit) (void *state);
+  int (*propagate) (void *state);
+  int (*add_reason_clause_lit) (void *state, int propagated_lit);
+  int (*decide) (void *state);
+  int (*advise_decision_polarity) (void *state, int default_literal);
+  int is_lazy;
+} kissat_external_propagator;
+
+void kissat_connect_external_propagator (
+    kissat *solver, const kissat_external_propagator *propagator);
+void kissat_disconnect_external_propagator (kissat *solver);
+void kissat_add_observed_var (kissat *solver, int var);
+void kissat_remove_observed_var (kissat *solver, int var);
+void kissat_reset_observed_vars (kissat *solver);
+int kissat_is_decision (kissat *solver, int lit);
 
 #endif

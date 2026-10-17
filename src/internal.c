@@ -92,6 +92,7 @@ void kissat_set_prefix (kissat *solver, const char *prefix) {
 
 void kissat_release (kissat *solver) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_release_heap (solver, SCORES);
   kissat_release_heap (solver, &solver->schedule);
   kissat_release_vectors (solver);
@@ -103,6 +104,7 @@ void kissat_release (kissat *solver) {
   RELEASE_STACK (solver->previous_assumptions);
   RELEASE_STACK (solver->failed);
   kissat_release_exchange (solver);
+  kissat_release_propagator (solver);
   RELEASE_STACK (solver->export);
   RELEASE_STACK (solver->import);
 
@@ -189,6 +191,7 @@ void kissat_release (kissat *solver) {
 
 void kissat_reserve (kissat *solver, int max_var) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require (0 <= max_var, "negative maximum variable argument '%d'",
                   max_var);
   kissat_require (max_var <= EXTERNAL_MAX_VAR,
@@ -223,6 +226,7 @@ int kissat_get_option (kissat *solver, const char *name) {
 int kissat_set_option (kissat *solver, const char *name, int new_value) {
 #ifndef NOPTIONS
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require (name, "name zero pointer");
   if (solver->solve_calls && !strcmp (name, "incremental"))
     kissat_require (new_value == GET_OPTION (incremental),
@@ -240,6 +244,7 @@ int kissat_set_option (kissat *solver, const char *name, int new_value) {
 
 void kissat_set_decision_limit (kissat *solver, unsigned limit) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   limits *limits = &solver->limits;
   limited *limited = &solver->limited;
   statistics *statistics = &solver->statistics;
@@ -252,6 +257,7 @@ void kissat_set_decision_limit (kissat *solver, unsigned limit) {
 
 void kissat_set_conflict_limit (kissat *solver, unsigned limit) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   limits *limits = &solver->limits;
   limited *limited = &solver->limited;
   statistics *statistics = &solver->statistics;
@@ -565,6 +571,7 @@ static bool eliminated_external (kissat *solver, int elit) {
 
 void kissat_add (kissat *solver, int elit) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   if (!GET_OPTION (incremental)) {
     kissat_require (!solver->solve_calls,
                     "enable incremental before adding clauses after solve");
@@ -596,6 +603,7 @@ void kissat_add (kissat *solver, int elit) {
 
 void kissat_protect (kissat *solver, int elit) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require_valid_external_internal (elit);
   kissat_require (GET_OPTION (incremental), "enable incremental first");
   kissat_require (EMPTY_STACK (solver->pending) &&
@@ -613,6 +621,7 @@ void kissat_protect (kissat *solver, int elit) {
 
 void kissat_unprotect (kissat *solver, int elit) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require_valid_external_internal (elit);
   const unsigned eidx = ABS (elit);
   kissat_require (eidx < SIZE_STACK (solver->import) &&
@@ -628,6 +637,7 @@ void kissat_assume (kissat *solver, int elit) {
 
 int kissat_failed (kissat *solver, int elit) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require_valid_external_internal (elit);
   if (solver->result != 20)
     return 0;
@@ -650,6 +660,7 @@ int kissat_maximum_variable (kissat *solver) {
 
 void kissat_set_phase (kissat *solver, int elit) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require_valid_external_internal (elit);
   const unsigned eidx = ABS (elit);
   if (eidx >= SIZE_STACK (solver->import))
@@ -665,6 +676,7 @@ void kissat_set_phase (kissat *solver, int elit) {
 
 int kissat_solve (kissat *solver) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require (EMPTY_STACK (solver->clause) &&
                   EMPTY_STACK (solver->pending),
                   "incomplete clause (terminating zero not added)");
@@ -754,6 +766,7 @@ void kissat_set_terminate (kissat *solver, void *state,
 
 int kissat_value (kissat *solver, int elit) {
   kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
   kissat_require_valid_external_internal (elit);
   const unsigned eidx = ABS (elit);
   if (eidx >= SIZE_STACK (solver->import))

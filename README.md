@@ -71,6 +71,32 @@ which the first search reads. `KISSAT_HAS_CLAUSE_EXCHANGE` identifies the
 extension, and `test/exchange.cpp` checks answers and models while copies
 exchange clauses under inprocessing, factoring and both incremental modes.
 
+An external propagator can take part in the search through the IPASIR-UP
+interface: `kissat_connect_external_propagator` takes CaDiCaL's callbacks as
+C function pointers, and `kissat_add_observed_var` protects a variable and
+has its assignments told. Notifications follow the trail, with root
+assignments told at the root and assignments kept by chronological
+backtracking told again. Propagated literals take their reason clause at
+once; that clause, like every external clause, propagates, conflicts or
+waits as the trail makes it, and conflicts are analyzed like learned ones.
+A complete assignment is a model only when the propagator accepts it, so
+lucky and greedy assignments are skipped while one is connected. Optional
+callbacks decide literals and, as in STP's CaDiCaL fork, advise the
+polarity of observed variables the ordinary heuristic picked; a lazy
+propagator (`is_lazy`) only checks complete assignments. A proposed literal
+that its reason does not imply, or a run of proposals that change nothing,
+ends the round of propagation instead of repeating. Callbacks may call only
+`kissat_is_decision` and `kissat_terminate`; the other calls abort.
+`KISSAT_HAS_EXTERNAL_PROPAGATOR` identifies the interface, and debug
+builds check the propagator's state after every notification.
+`test/propagator.cpp` checks it against a propagator holding clauses the
+solver never sees directly, varying what CryptoMiniSat's IPASIR-UP fuzzer
+varies: lazy propagators, mangled and broken reasons, models rejected
+without a clause, stopped searches, and variables observed late (fixed ones
+included), unobserved and observed again after a reconnect.
+`test/propagator-exchange.cpp` runs copies that exchange learned clauses
+while each has such a propagator connected.
+
 Factoring introduces external variable IDs. An incremental API client must
 allocate fresh IDs beyond both its already declared IDs and
 `kissat_maximum_variable`, or disable `factor` before the first solve.

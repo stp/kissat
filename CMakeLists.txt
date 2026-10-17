@@ -107,6 +107,19 @@ if(BUILD_TESTING)
     target_link_libraries(kissat-exchange-test PRIVATE kissat)
     add_test(NAME clause-exchange COMMAND kissat-exchange-test 150)
     set_tests_properties(clause-exchange PROPERTIES TIMEOUT 300 LABELS exchange)
+    add_executable(kissat-propagator-test test/propagator.cpp)
+    target_compile_features(kissat-propagator-test PRIVATE cxx_std_17)
+    target_link_libraries(kissat-propagator-test PRIVATE kissat)
+    add_test(NAME external-propagator COMMAND kissat-propagator-test 200)
+    set_tests_properties(external-propagator PROPERTIES TIMEOUT 300
+        LABELS propagator)
+    add_executable(kissat-propagator-exchange-test test/propagator-exchange.cpp)
+    target_compile_features(kissat-propagator-exchange-test PRIVATE cxx_std_17)
+    target_link_libraries(kissat-propagator-exchange-test PRIVATE kissat)
+    add_test(NAME propagator-exchange
+        COMMAND kissat-propagator-exchange-test 100)
+    set_tests_properties(propagator-exchange PROPERTIES TIMEOUT 300
+        LABELS "propagator;exchange")
     add_test(NAME lucky-interruption
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/test/lucky-interruption.py"

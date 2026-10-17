@@ -221,7 +221,10 @@ void kissat_decide (kissat *solver) {
   solver->level++;
   assert (solver->level != INVALID_LEVEL);
   const unsigned idx = kissat_next_decision_variable (solver);
-  const value value = kissat_decide_phase (solver, idx);
+  value value = kissat_decide_phase (solver, idx);
+  if (solver->propagator.callbacks.advise_decision_polarity &&
+      !solver->warming && FLAGS (idx)->observed)
+    value = kissat_propagator_advise (solver, idx, value);
   unsigned lit = LIT (idx);
   if (value < 0)
     lit = NOT (lit);

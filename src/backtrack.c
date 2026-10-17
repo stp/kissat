@@ -78,6 +78,7 @@ void kissat_backtrack_without_updating_phases (kissat *solver,
   LOG ("backtracking to decision level %u", new_level);
 
   frame *new_frame = &FRAME (new_level + 1);
+  kissat_propagator_backtrack (solver, new_level, new_frame->trail);
   SET_END_OF_STACK (solver->frames, new_frame);
 
   value *values = solver->values;

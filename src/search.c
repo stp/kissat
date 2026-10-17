@@ -182,6 +182,12 @@ static bool searching (kissat *solver) {
   return true;
 }
 
+static inline bool external_propagating (kissat *solver) {
+  return solver->propagator.connected &&
+         !solver->propagator.callbacks.is_lazy &&
+         SIZE_ARRAY (solver->trail) != solver->propagator.propagated;
+}
+
 static inline bool importing (kissat *solver) {
   return solver->exchange.next && CONFLICTS >= solver->exchange.limit;
 }
@@ -193,11 +199,14 @@ int kissat_search (kissat *solver) {
     res = 20;
   const bool first = !solver->solve_calls;
   const bool assumptions = !EMPTY_STACK (solver->assumptions);
-  if (!res && first && !assumptions && GET_OPTION (luckyearly))
+  // Lucky assignments are models no external propagator has checked.
+  const bool external = solver->propagator.connected;
+  solver->propagator.propagated = INVALID_PROPAGATED;
+  if (!res && first && !assumptions && !external && GET_OPTION (luckyearly))
     res = kissat_lucky (solver);
   if (!res && first && kissat_preprocessing (solver))
     res = kissat_preprocess (solver);
-  if (!res && first && !assumptions && GET_OPTION (luckylate))
+  if (!res && first && !assumptions && !external && GET_OPTION (luckylate))
     res = kissat_lucky (solver);
   if (!res)
     kissat_classify (solver);
@@ -207,7 +216,7 @@ int kissat_search (kissat *solver) {
     const uint64_t original_clauses = GET (clauses_original);
     const uint64_t last_greedy = solver->incremental_lucky_last_clauses;
     bool greedy_pending =
-        greedy_mode && GET_OPTION (incremental) &&
+        greedy_mode && !external && GET_OPTION (incremental) &&
         !solver->limited.conflicts && !solver->limited.decisions &&
         original_clauses >=
             (unsigned) GET_OPTION (incrementalluckyminclauses) &&
@@ -225,11 +234,21 @@ int kissat_search (kissat *solver) {
         res = kissat_analyze (solver, conflict);
       else if (solver->iterating)
         iterate (solver);
-      else if (kissat_assuming (solver))
+      else if (external_propagating (solver)) {
+        if (kissat_propagator_propagate (solver) == 20)
+          res = 20;
+      } else if (kissat_assuming (solver))
         res = kissat_assign_assumption (solver);
-      else if (!solver->unassigned)
-        res = 10;
-      else if (TERMINATED (search_terminated_1))
+      else if (!solver->unassigned) {
+        if (!external)
+          res = 10;
+        else {
+          const int checked = kissat_propagator_check_model (solver);
+          if (checked < 0)
+            break; // rejected without a clause: unknown
+          res = checked;
+        }
+      } else if (TERMINATED (search_terminated_1))
         break;
       else if (importing (solver))
         res = kissat_import_clauses (solver); // shared clauses (STP)
@@ -260,7 +279,7 @@ int kissat_search (kissat *solver) {
         break;
       else if (decision_limit_hit (solver))
         break;
-      else
+      else if (!kissat_propagator_decide (solver))
         kissat_decide (solver);
     }
     stop_search (solver);
