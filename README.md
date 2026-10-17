@@ -97,6 +97,16 @@ included), unobserved and observed again after a reconnect.
 `test/propagator-exchange.cpp` runs copies that exchange learned clauses
 while each has such a propagator connected.
 
+`kissat_simplify` runs what a solve runs before its first decision (the
+preprocessing rounds, on the first solve) and stops there, returning 20
+for an inconsistent formula, 10 when a lucky assignment satisfied it and 0
+otherwise; `kissat_root_fixed` then says which literals are fixed at the
+root, with 0 for a variable eliminated or substituted. STP derives facts
+about a query's Boolean skeleton this way. `KISSAT_HAS_ROOT_SIMPLIFY`
+identifies the extension, and `test/simplify.cpp` checks that every
+reported literal is implied, that every literal unit propagation implies
+is reported, and that a solve afterwards answers correctly.
+
 Factoring introduces external variable IDs. An incremental API client must
 allocate fresh IDs beyond both its already declared IDs and
 `kissat_maximum_variable`, or disable `factor` before the first solve.

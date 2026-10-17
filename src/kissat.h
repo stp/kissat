@@ -6,6 +6,7 @@
 #define KISSAT_HAS_INCREMENTAL_GREEDY 1
 #define KISSAT_HAS_CLAUSE_EXCHANGE 1
 #define KISSAT_HAS_EXTERNAL_PROPAGATOR 1
+#define KISSAT_HAS_ROOT_SIMPLIFY 1
 
 #include <stddef.h>
 #include <stdint.h>
@@ -112,6 +113,19 @@ void kissat_get_import_statistics (kissat *solver,
 // changes, so copies of one solver search differently on the same clauses.
 
 void kissat_diversify (kissat *solver, int seed, int phase, int shuffle);
+
+// Simplification without search (an STP extension). 'kissat_simplify'
+// runs what a solve runs before its first decision -- on the first solve
+// that includes the preprocessing rounds -- but no lucky or greedy
+// assignment, and stops there: it returns 20 when the formula is
+// inconsistent, 10 when simplification alone settled it satisfiable, and 0
+// otherwise. It is a solve call, so a later solve needs the
+// 'incremental' option. 'kissat_root_fixed' then says whether a literal is
+// fixed at the root: 1 true, -1 false, 0 not fixed or not known (zero is
+// always sound, as for a variable eliminated or substituted).
+
+int kissat_simplify (kissat *solver);
+int kissat_root_fixed (kissat *solver, int lit);
 
 // External propagation, the IPASIR-UP interface (an STP extension), with
 // CaDiCaL's callbacks as C function pointers and the decision polarity

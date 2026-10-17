@@ -747,6 +747,33 @@ int kissat_solve (kissat *solver) {
   return res;
 }
 
+int kissat_simplify (kissat *solver) {
+  kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
+  kissat_set_decision_limit (solver, 0);
+  solver->simplifying = true;
+  const int res = kissat_solve (solver);
+  solver->simplifying = false;
+  return res;
+}
+
+int kissat_root_fixed (kissat *solver, int elit) {
+  kissat_require_initialized (solver);
+  kissat_require_outside_callbacks (solver);
+  kissat_require_valid_external_internal (elit);
+  const unsigned eidx = ABS (elit);
+  if (eidx >= SIZE_STACK (solver->import))
+    return 0;
+  const import *const import = &PEEK_STACK (solver->import, eidx);
+  if (!import->imported || import->eliminated)
+    return 0;
+  unsigned ilit = import->lit;
+  if (elit < 0)
+    ilit = NOT (ilit);
+  const value fixed = kissat_fixed (solver, ilit);
+  return fixed > 0 ? 1 : fixed < 0 ? -1 : 0;
+}
+
 void kissat_terminate (kissat *solver) {
   kissat_require_initialized (solver);
 #ifdef COVERAGE
