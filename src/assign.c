@@ -17,6 +17,8 @@ void kissat_learned_unit (kissat *solver, unsigned lit) {
   kissat_assign_unit (solver, lit, "learned reason");
   CHECK_AND_ADD_UNIT (lit);
   ADD_UNIT_TO_PROOF (lit);
+  if (solver->exchange.max_size)
+    kissat_export_clause (solver, 1, &lit);
 }
 
 void kissat_original_unit (kissat *solver, unsigned lit) {

@@ -102,6 +102,11 @@ if(BUILD_TESTING)
     target_link_libraries(kissat-allocator-test PRIVATE kissat)
     add_test(NAME allocator-failure COMMAND kissat-allocator-test)
     set_tests_properties(allocator-failure PROPERTIES TIMEOUT 30 LABELS incremental)
+    add_executable(kissat-exchange-test test/exchange.cpp)
+    target_compile_features(kissat-exchange-test PRIVATE cxx_std_17)
+    target_link_libraries(kissat-exchange-test PRIVATE kissat)
+    add_test(NAME clause-exchange COMMAND kissat-exchange-test 150)
+    set_tests_properties(clause-exchange PROPERTIES TIMEOUT 300 LABELS exchange)
     add_test(NAME lucky-interruption
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/test/lucky-interruption.py"
