@@ -13,6 +13,7 @@ struct flags {
   bool eliminated : 1;
   unsigned factor : 2;
   bool fixed : 1;
+  bool observed : 1;
   bool subsume : 1;
   bool sweep : 1;
   bool transitive : 1;

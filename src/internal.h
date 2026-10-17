@@ -23,6 +23,7 @@
 #include "phases.h"
 #include "profile.h"
 #include "proof.h"
+#include "propagator.h"
 #include "queue.h"
 #include "random.h"
 #include "reluctant.h"
@@ -116,6 +117,7 @@ struct kissat {
   termination termination;
   kissat_allocator allocator;
   exchange exchange;
+  propagator propagator;
 
   unsigned vars;
   unsigned size;
