@@ -120,6 +120,12 @@ if(BUILD_TESTING)
         COMMAND kissat-propagator-exchange-test 100)
     set_tests_properties(propagator-exchange PROPERTIES TIMEOUT 300
         LABELS "propagator;exchange")
+    add_executable(kissat-simplify-test test/simplify.cpp)
+    target_compile_features(kissat-simplify-test PRIVATE cxx_std_17)
+    target_link_libraries(kissat-simplify-test PRIVATE kissat)
+    add_test(NAME root-simplify COMMAND kissat-simplify-test 300)
+    set_tests_properties(root-simplify PROPERTIES TIMEOUT 300
+        LABELS simplify)
     add_test(NAME lucky-interruption
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/test/lucky-interruption.py"

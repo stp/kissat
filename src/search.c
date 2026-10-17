@@ -199,14 +199,16 @@ int kissat_search (kissat *solver) {
     res = 20;
   const bool first = !solver->solve_calls;
   const bool assumptions = !EMPTY_STACK (solver->assumptions);
-  // Lucky assignments are models no external propagator has checked.
+  // Lucky assignments are models no external propagator has checked, and
+  // they would answer a simplification instead of letting it simplify.
   const bool external = solver->propagator.connected;
+  const bool unlucky = external || solver->simplifying;
   solver->propagator.propagated = INVALID_PROPAGATED;
-  if (!res && first && !assumptions && !external && GET_OPTION (luckyearly))
+  if (!res && first && !assumptions && !unlucky && GET_OPTION (luckyearly))
     res = kissat_lucky (solver);
   if (!res && first && kissat_preprocessing (solver))
     res = kissat_preprocess (solver);
-  if (!res && first && !assumptions && !external && GET_OPTION (luckylate))
+  if (!res && first && !assumptions && !unlucky && GET_OPTION (luckylate))
     res = kissat_lucky (solver);
   if (!res)
     kissat_classify (solver);
@@ -216,7 +218,7 @@ int kissat_search (kissat *solver) {
     const uint64_t original_clauses = GET (clauses_original);
     const uint64_t last_greedy = solver->incremental_lucky_last_clauses;
     bool greedy_pending =
-        greedy_mode && !external && GET_OPTION (incremental) &&
+        greedy_mode && !unlucky && GET_OPTION (incremental) &&
         !solver->limited.conflicts && !solver->limited.decisions &&
         original_clauses >=
             (unsigned) GET_OPTION (incrementalluckyminclauses) &&

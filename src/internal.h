@@ -88,6 +88,7 @@ struct kissat {
   bool iterating;
   bool preprocessing;
   bool probing;
+  bool simplifying; // in 'kissat_simplify' (STP extension)
 #ifndef QUIET
   bool sectioned;
 #endif
