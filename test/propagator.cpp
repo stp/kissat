@@ -12,12 +12,14 @@
 // resumed, and variables observed (fixed ones and after the formula became
 // inconsistent included), unobserved and observed again on a reconnected
 // propagator between solves. Separate processes check that a callback
-// calling into the solver is refused.
+// calling into the solver is refused (not on Windows, which has no fork()).
 #include "theory.h"
 
+#ifndef _WIN32
 #include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 namespace {
 
@@ -33,6 +35,8 @@ struct Terminator {
     return t.fired;
   }
 };
+
+#ifndef _WIN32
 
 // Whether a callback calling 'call' on the solver is refused (aborts).
 
@@ -97,11 +101,15 @@ void check_refusals() {
     fail(0, "a callback calling into the solver was not refused");
 }
 
+#endif
+
 } // namespace
 
 int main(int argc, char **argv) {
   const unsigned rounds = argc > 1 ? std::atoi(argv[1]) : 300;
+#ifndef _WIN32
   check_refusals();
+#endif
   std::mt19937 random(20261018);
   unsigned long answers[3] = {0, 0, 0}, solves = 0, lazy_solves = 0;
   unsigned long late = 0, late_fixed = 0, after_unsat = 0, unobserved = 0,

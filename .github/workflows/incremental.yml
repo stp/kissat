@@ -34,3 +34,33 @@ jobs:
           fi
           make --jobs=2 test
           python3 test/incremental.py --cases 500
+
+  # The library as STP builds it on Windows: MSYS2's UCRT64 GCC through CMake.
+  # Without -mno-ms-bitfields every API test aborts (Debug) or crashes
+  # (Release) here.
+  mingw:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+      - name: CMake library and API tests
+        run: |
+          cmake -S . -B build-cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DBUILD_TESTING=ON
+          cmake --build build-cmake --parallel 4
+          ctest --test-dir build-cmake --output-on-failure
