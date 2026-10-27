@@ -18,6 +18,52 @@ double kissat_wall_clock_time (void) {
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifdef _WIN32
+
+// Windows has no getrusage() or /proc. GetProcessMemoryInfo resolves to
+// kernel32's K32GetProcessMemoryInfo, so no psapi.dll import is needed.
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <psapi.h>
+
+static double kissat_filetime_seconds (FILETIME t) {
+  ULARGE_INTEGER ticks;
+  ticks.LowPart = t.dwLowDateTime;
+  ticks.HighPart = t.dwHighDateTime;
+  return 1e-7 * (double) ticks.QuadPart;
+}
+
+double kissat_process_time (void) {
+  FILETIME created, exited, kernel, user;
+  if (!GetProcessTimes (GetCurrentProcess (), &created, &exited, &kernel,
+                        &user))
+    return 0;
+  return kissat_filetime_seconds (user) + kissat_filetime_seconds (kernel);
+}
+
+static int kissat_memory_counters (PROCESS_MEMORY_COUNTERS *counters) {
+  return GetProcessMemoryInfo (GetCurrentProcess (), counters,
+                               sizeof *counters);
+}
+
+uint64_t kissat_maximum_resident_set_size (void) {
+  PROCESS_MEMORY_COUNTERS counters;
+  if (!kissat_memory_counters (&counters))
+    return 0;
+  return counters.PeakWorkingSetSize;
+}
+
+uint64_t kissat_current_resident_set_size (void) {
+  PROCESS_MEMORY_COUNTERS counters;
+  if (!kissat_memory_counters (&counters))
+    return 0;
+  return counters.WorkingSetSize;
+}
+
+#else
+
 #include <sys/resource.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -66,6 +112,8 @@ uint64_t kissat_current_resident_set_size (void) {
   fclose (file);
   return scanned == 2 ? rss * sysconf (_SC_PAGESIZE) : 0;
 }
+
+#endif
 
 #endif
 

@@ -5,7 +5,14 @@ project(kissat LANGUAGES C)
 include(GNUInstallDirs)
 option(BUILD_SHARED_LIBS "Build the Kissat library as a shared library" OFF)
 option(BUILD_TESTING "Build incremental API tests" OFF)
-option(KISSAT_BUILD_CLI "Build the standalone Kissat executable" ON)
+# The executable's time limit needs alarm() and SIGALRM, which Windows lacks.
+if(WIN32)
+    set(_kissat_build_cli_default OFF)
+else()
+    set(_kissat_build_cli_default ON)
+endif()
+option(KISSAT_BUILD_CLI "Build the standalone Kissat executable"
+    ${_kissat_build_cli_default})
 set(KISSAT_IDENTIFIER "" CACHE STRING "Source revision recorded in the library")
 
 if(MSVC)
@@ -51,6 +58,14 @@ function(kissat_configure_target target)
     # they can discard a partial solver and release its owned allocations.
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(${target} PRIVATE -fexceptions)
+    endif()
+    # MinGW lays out bitfields as MSVC does: a field whose declared type
+    # differs from the previous field's starts a new storage unit. A watch (a
+    # 31-bit literal and a bool) then takes 8 bytes rather than 4, which
+    # assertions catch and a release build turns into corrupted watch lists.
+    # kissat.h declares no bitfields, so clients need not use the same layout.
+    if(WIN32)
+        target_compile_options(${target} PRIVATE -mno-ms-bitfields)
     endif()
     if(UNIX)
         target_link_libraries(${target} PRIVATE m)
